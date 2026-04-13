@@ -1,0 +1,1668 @@
+---
+description: Comprehensive build and maintenance guide for the Gematria Cipher Betting App
+globs: ["**/*.ts", "**/*.tsx"]
+---
+
+# Gematria Cipher Betting App — Build Guide
+
+This document is the authoritative reference for AI agents maintaining the Gematria
+Cipher Betting System. Read this before modifying any code.
+
+---
+
+## 1. Architecture Overview
+
+### Stack
+
+| Layer | Technology | Version |
+|-------|-----------|---------|
+| Framework | Next.js (App Router) | 16.2.1 |
+| UI | React | 19.2.4 |
+| Language | TypeScript | 5.x |
+| Styling | Tailwind CSS v4 | 4.x |
+| Database | Supabase (PostgreSQL + PostgREST) | 2.100.1 |
+| AI | Anthropic Claude SDK | 0.80.0 |
+| Charts | Recharts | 3.8.1 |
+| Icons | lucide-react | 1.7.0 |
+| Toasts | sonner | 2.0.7 |
+
+### Path Alias
+
+`@/` maps to `src/`. All imports use this alias. Example: `import { getTodayET } from '@/lib/date-utils'`.
+
+### Dev Server
+
+```
+npm run dev
+```
+
+Runs on port 3000 by default. No custom port configuration.
+
+### Critical Architectural Rules
+
+1. **Dates**: ALWAYS use `getTodayET()` from `@/lib/date-utils`. NEVER use raw
+   `new Date()` for calendar-date logic. The ET conversion prevents the UTC midnight
+   rollover bug where games at 7 PM ET appear under the wrong date.
+
+2. **Supabase clients**: `getSupabase()` for client-side reads (anon key).
+   `getSupabaseAdmin()` for ALL server-side writes (service key). Using the anon
+   client for writes will silently fail due to RLS policies.
+
+3. **Request interception**: Next.js 16 uses `proxy.ts` (NOT `middleware.ts`).
+   The proxy function is exported from `src/proxy.ts` and handles auth gating.
+
+4. **API routes**: Every route must export `const dynamic = 'force-dynamic'`.
+   Long-running routes (analyze) must export `const maxDuration = 300`.
+
+5. **Shell**: The host OS is Windows/PowerShell. Use `;` not `&&` for chaining
+   shell commands.
+
+---
+
+## 2. Source Layout
+
+```
+src/
+  proxy.ts              # Request interception (auth gate) — NOT middleware.ts
+  app/
+    layout.tsx           # Root layout: fonts (Inter, JetBrains Mono), Toaster
+    page.tsx             # Dashboard (client component)
+    globals.css          # Tailwind v4 @theme + utility classes
+    login/page.tsx       # Password login page
+    live/page.tsx        # Live pending bets view
+    history/page.tsx     # Settled bet history with filters
+    stats/page.tsx       # Performance stats + equity curve + breakdowns
+    settings/page.tsx    # AI model, prompts, bet sizing, auto-bet toggles
+    cipher-lab/page.tsx  # Interactive gematria calculator
+    api/
+      analyze/route.ts        # POST: Claude analysis + auto-bet (SSE stream)
+      fetch-games/route.ts    # GET: load from DB | POST: fetch APIs + upsert + odds
+      settle/route.ts         # POST: settlement sweep
+      calculate/route.ts      # POST: gematria text or date calculation
+      settings/route.ts       # GET/PUT: gematria_settings singleton
+      auth/login/route.ts     # POST: password auth + session cookie
+      trades/
+        live/route.ts         # GET: pending trades + bankroll snapshot
+        history/route.ts      # GET: settled trades with filters + summary
+        stats/route.ts        # GET: full performance stats + breakdowns
+  lib/
+    types.ts                  # All TypeScript interfaces
+    gematria.ts               # Cipher engine (4 ciphers + 8 date methods)
+    analysis-engine.ts        # Alignment detection + lock classification
+    claude-agent.ts           # Claude API integration + prompt building
+    paper-trading.ts          # Bankroll validation + stake calculation
+    settlement.ts             # Trade result determination + P&L
+    sports-api.ts             # ESPN (NBA/MLB) + NHL API fetchers
+    odds-api.ts               # Polymarket Gamma odds fetcher + consolidation
+    polymarket-sports-slug.ts # Polymarket slug parsing + team code resolution
+    date-utils.ts             # ET timezone date helpers
+    moon-phase.ts             # Lunar phase calculation
+    supabase.ts               # Browser Supabase client (anon key)
+    supabase-server.ts        # Server Supabase client (service key)
+    auth.ts                   # HMAC session token creation + verification
+    constants/
+      index.ts                # Team lookup aggregator (findTeam)
+      teams-nba.ts            # 30 NBA teams with TeamInfo
+      teams-nhl.ts            # 32 NHL teams with TeamInfo
+      teams-mlb.ts            # 30 MLB teams with TeamInfo
+  components/
+    Nav.tsx                   # Top navigation bar
+    GameCard.tsx              # Game card with odds, lock badge, trade info
+    LockBadge.tsx             # Lock type badge (triple/double/single/no)
+    StatCard.tsx              # Stat display card
+    TradeCard.tsx             # Trade card with result, reasoning toggle
+    EquityCurve.tsx           # Recharts area chart for bankroll curve
+    ProgressBar.tsx           # Generic progress bar
+```
+
+---
+
+## 3. File-by-File Reference: src/lib/
+
+### types.ts
+
+All shared TypeScript interfaces for the application.
+
+**Exports:**
+
+| Interface | Purpose |
+|-----------|---------|
+| `Game` | Database row for a scheduled/in-progress/final game |
+| `ConsolidatedOdds` | Cached JSONB odds on game row (ML, spread, O/U, implied prob) |
+| `TradeDecision` | Claude output: action, betType, pick, odds, units, confidence, reasoning |
+| `PaperTrade` | Database row for a placed bet with result and P&L |
+| `LedgerRow` | Daily bankroll ledger entry |
+| `GematriaSettings` | Singleton settings: prompts, model, sizing, auto-bet toggles |
+| `LockType` | `'triple_lock' \| 'double_lock' \| 'single_lock' \| 'no_lock'` |
+| `Alignment` | Single cipher-date match with metadata |
+| `TeamGematria` | Cipher values for all team name variants |
+| `GameAnalysis` | Full analysis output: alignments, lock, confidence, picked side |
+| `GematriaResult` | Four cipher values for a text string |
+| `DateNumerology` | Eight date numerology values |
+
+**Key fields on `Game`:**
+
+- `id: string` — ESPN/NHL game ID (used as primary key)
+- `league: 'NBA' | 'NHL' | 'MLB'`
+- `game_date: string` — YYYY-MM-DD in ET
+- `home_team / away_team: string` — ESPN `displayName` format
+- `home_score / away_score: number | null`
+- `status: 'scheduled' | 'pre' | 'in_progress' | 'final'`
+- `polymarket_odds: ConsolidatedOdds | null` — JSONB cache
+- `home_wins / away_wins: number` — current season record
+- `home_losses / away_losses: number | null`
+- `is_full_moon: boolean`
+- `analyzed: boolean` — flipped to true after Claude processes
+
+**Key fields on `PaperTrade`:**
+
+- `game_id: string` — FK to games.id
+- `bet_type: 'moneyline' | 'over_under'`
+- `pick: string` — team name or "Over 215.5" / "Under 6.5"
+- `picked_side: 'home' | 'away' | null`
+- `odds: number | null` — American odds
+- `units: number` — bet size in units
+- `stake: number` — dollars wagered (units * unit_size)
+- `result: 'pending' | 'win' | 'loss' | 'push' | 'void'`
+- `profit_loss: number` — settled dollar P&L
+- `lock_type: string | null` — lock classification at time of bet
+- `confidence: number | null` — Claude confidence 0-100
+- `reasoning: string | null` — Claude's explanation
+
+---
+
+### gematria.ts
+
+Pure deterministic cipher engine. No AI, no network calls.
+
+**Cipher tables (exported):**
+
+| Constant | Mapping |
+|----------|---------|
+| `ORDINAL` | A=1, B=2, ... Z=26 |
+| `REDUCTION` | A=1, B=2, ... I=9, J=1, K=2, ... R=9, S=1, ... Z=8 |
+| `REV_ORDINAL` | A=26, B=25, ... Z=1 |
+| `REV_REDUCTION` | A=8, B=7, ... I=9, J=8, ... R=9, S=8, ... Z=1 |
+
+**Exported functions:**
+
+| Function | Signature | Purpose |
+|----------|-----------|---------|
+| `calculateGematria` | `(text: string) => GematriaResult` | Compute all 4 cipher values for a string |
+| `calculateDateNumerology` | `(date: Date) => DateNumerology` | Compute all 8 date methods |
+| `getAllGematriaValues` | `(result: GematriaResult) => number[]` | Extract array of 4 cipher values |
+| `getAllDateValues` | `(numerology: DateNumerology) => number[]` | Extract array of 8 date values |
+| `findMatchingValues` | `(gematria, dateNums) => Match[]` | Find cipher-date value matches |
+
+**Date numerology methods:**
+
+| Method | Calculation | Example (4/8/2026) |
+|--------|-------------|-------------------|
+| `full` | month + day + first2OfYear + last2OfYear | 4 + 8 + 20 + 26 = 58 |
+| `reducedYear` | month + day + digitSum(year) | 4 + 8 + 10 = 22 |
+| `singleDigits` | digitSum(month) + digitSum(day) + digitSum(year) | 4 + 8 + 10 = 22 |
+| `shortYear` | month + day + last2OfYear | 4 + 8 + 26 = 38 |
+| `monthDay` | month + day | 4 + 8 = 12 |
+| `rootNumber` | reduce singleDigits to one digit | 22 -> 4 |
+| `calendarDay` | day of month (1-31) | 8 |
+| `calendarMonth` | month number (1-12) | 4 |
+
+Note: `calendarMonth` is excluded from auto-matching in `findMatchingValues` because
+small integers produce excessive noise. It is available in the calculator UI.
+
+---
+
+### analysis-engine.ts
+
+Finds gematria alignments between team names and date numerology. Classifies lock
+types and computes confidence scores.
+
+**Alignment types (16 total):**
+
+| Type | Weight | Rank | Description |
+|------|--------|------|-------------|
+| `date_city` | 30 | 1 | City name cipher = date value |
+| `date_fullname` | 30 | 1 | Full team name cipher = date value |
+| `date_team` | 25 | 1 | Nickname cipher = date value |
+| `cipher_mirror` | 28 | 1 | Opponent short identity cipher = home/away big identity cipher |
+| `win_target` | 25 | 2 | Next win number = opponent cipher value |
+| `coach` | 22 | 2 | Coach name cipher = date value |
+| `loss_count_match` | 22 | 3 | Star/goalie cipher = opponent loss count |
+| `area_code` | 18 | 2 | City area code = date value |
+| `star_player` | 20 | 3 | Star player cipher = date value |
+| `goalie_team` | 18 | 3 | Goalie cipher = own team cipher |
+| `date_abbreviation` | 15 | 2 | Team abbreviation cipher = date value |
+| `goalie` | 15 | 3 | Goalie cipher = date value |
+| `jersey_date` | 15 | 3 | Jersey number = date value |
+| `jersey_opponent` | 12 | 3 | Jersey number = opponent cipher |
+| `venue` | 10 | 4 | Venue name cipher = date value |
+| `venue_part` | 8 | 4 | Venue word cipher = date value |
+| `market_date` | 0 | 4 | "Over"/"Under"/"Push" cipher = date value (narrative only, zero weight) |
+
+**Lock classification:**
+
+| Lock Type | Condition |
+|-----------|-----------|
+| `triple` | >= 3 non-market alignments for favored side |
+| `double` | 2 non-market alignments |
+| `single` | 1 non-market alignment |
+| `skip` | 0 alignments, OR both sides scored and weighted gap < 15 |
+
+**Confidence formula:**
+- Base: triple=70, double=58, single=52, skip=0
+- Bonus: min(15, netDiff * 0.2)
+- Cap: 85
+- Skip override: if both sides have alignments and `|homeScore - awayScore| < 15`, lock = skip
+
+**Key exported function:**
+
+```typescript
+analyzeGame(params: {
+  gameId: string;
+  league: 'NBA' | 'NHL' | 'MLB';
+  date: Date;
+  homeTeamName: string;
+  awayTeamName: string;
+  venueName: string;
+  homeWins: number;
+  awayWins: number;
+  homeStarPlayers?: string[];
+  awayStarPlayers?: string[];
+  homeGoalie?: string;
+  awayGoalie?: string;
+  homeCoach?: string;
+  awayCoach?: string;
+  homeJerseyNumbers?: number[];
+  awayJerseyNumbers?: number[];
+  homeLosses?: number | null;
+  awayLosses?: number | null;
+}): GameAnalysis
+```
+
+Returns a `GameAnalysis` with all alignments, grading breakdown, lock type,
+confidence, and picked side.
+
+---
+
+### claude-agent.ts
+
+Orchestrates Claude API calls for game analysis and trade decisions.
+
+**Exports:**
+
+| Export | Type | Purpose |
+|--------|------|---------|
+| `GameAnalysisResult` | interface | Lock type, confidence, picked side, alignment count |
+| `analyzeGameWithClaude` | async function | Full pipeline: engine analysis -> prompt build -> Claude call -> parse |
+
+**Flow of `analyzeGameWithClaude(game, settings)`:**
+
+1. Parse game date, run `analyzeGame()` from analysis-engine
+2. Build system message: `settings.system_prompt` + `settings.bet_rules` + JSON format instructions
+3. Build user message with sections: GAME, DATE NUMEROLOGY, HOME/AWAY CIPHERS,
+   HOME/AWAY ALIGNMENTS, GEMATRIA SUMMARY, ODDS
+4. Call `new Anthropic().messages.create()` with `settings.model`, `max_tokens: 2048`
+5. Extract text block from response
+6. Parse JSON with `robustJsonParse()` (handles markdown fences, bracket extraction)
+7. Return `{ analysis: GameAnalysisResult, decisions: TradeDecision[] }`
+
+**CRITICAL: Robust JSON parsing.** Claude sometimes wraps JSON in markdown fences
+or adds text around it. `robustJsonParse` tries three strategies:
+1. Direct `JSON.parse`
+2. Strip `` ```json ``` `` fences, then parse
+3. Regex extract first `[...]` or `{...}` block, then parse
+
+If all three fail, it throws. Never assume Claude returns clean JSON.
+
+**Claude model names used:**
+- `claude-sonnet-4-20250514` (default)
+- `claude-opus-4-6`
+- `claude-haiku-4-20250414`
+
+---
+
+### paper-trading.ts
+
+Bankroll validation and stake calculation. No database access.
+
+**Exports:**
+
+| Function | Signature | Purpose |
+|----------|-----------|---------|
+| `canPlaceBet` | `(balance, todayUnits, units, settings) => boolean` | Check if bet is allowed |
+| `calculateStake` | `(units, unitSize) => number` | Units times unit size |
+| `calculatePayout` | `(stake, odds) => number` | Win amount from American odds |
+
+**Payout formula:**
+- Positive odds (e.g. +150): `stake * (odds / 100)`
+- Negative odds (e.g. -130): `stake * (100 / |odds|)`
+
+**Bet validation checks:**
+1. Balance must cover the stake
+2. `todayUnits + units` must not exceed `max_daily_units`
+3. `units` must not exceed `max_units_per_bet`
+
+---
+
+### settlement.ts
+
+Determines trade results from final scores and calculates P&L.
+
+**Exports:**
+
+| Function | Purpose |
+|----------|---------|
+| `parseOverUnderLine(pick)` | Extract "over"/"under" side and numeric line from pick string |
+| `determineTradeResult(trade, homeScore, awayScore)` | Returns 'win', 'loss', 'push', or 'void' |
+| `profitLossForSettledTrade(trade, result)` | Dollar P&L: win=payout, loss=-stake, push/void=0 |
+
+**Settlement logic:**
+
+For `over_under`:
+1. Parse pick string for side ("over"/"under") and line number
+2. If total = line, push. If over and total > line, win. Else loss.
+3. If pick cannot be parsed, void.
+
+For `moneyline`:
+1. Compare scores based on `picked_side` ("home" or "away")
+2. If picked team scored more, win. Less, loss. Equal, push.
+3. If `picked_side` is null, void.
+
+---
+
+### sports-api.ts
+
+Fetches game schedules and scores from ESPN and NHL public APIs.
+
+**Base URLs:**
+- ESPN: `https://site.api.espn.com/apis/site/v2/sports`
+- NHL: `https://api-web.nhle.com/v1`
+
+**Exports:**
+
+| Function | Signature | Purpose |
+|----------|-----------|---------|
+| `fetchWithRetry` | `(url, retries=3, delayMs=1000) => Promise<Response>` | HTTP GET with retry + backoff on 429/5xx |
+| `parseEspnCompetitorScore` | `(raw) => number` | Normalize ESPN score field (number, string, or `{value}` object) |
+| `fetchNBAGames` | `(dateStr: string) => Promise<ESPNGame[]>` | NBA scoreboard for YYYYMMDD date |
+| `fetchMLBGames` | `(dateStr: string) => Promise<ESPNGame[]>` | MLB scoreboard for YYYYMMDD date |
+| `fetchNHLGames` | `(dateStr: string) => Promise<NHLGame[]>` | NHL schedule for YYYY-MM-DD date |
+| `fetchNhlStandingsMap` | `(forceFresh?) => Promise<NhlStandingsByAbbrev>` | NHL W-L-OTL standings (10-min cache) |
+| `buildNhlStandingsByAbbrev` | `(data) => NhlStandingsByAbbrev` | Parse standings API response |
+
+**CRITICAL date format difference:**
+- ESPN uses `YYYYMMDD` (no dashes): `20260408`
+- NHL uses `YYYY-MM-DD` (with dashes): `2026-04-08`
+- The fetch functions handle this internally, but callers pass YYYY-MM-DD and
+  `fetchNBAGames`/`fetchMLBGames` strip dashes.
+
+**ESPN response shape:**
+```
+data.events[].competitions[0].competitors[] -> { homeAway, team.displayName, score, records[0].summary }
+data.events[].competitions[0].venue -> { fullName, address.city, address.state }
+data.events[].competitions[0].status -> { type.state ('pre'|'in'|'post'), period, displayClock }
+```
+
+**NHL response shape:**
+```
+data.gameWeek[].games[] -> { id, startTimeUTC, gameState, homeTeam, awayTeam, venue.default }
+homeTeam/awayTeam -> { id, placeName.default, commonName.default, abbrev, score }
+```
+
+NHL `gameState` values: `FUT`, `PRE` -> 'pre'; `LIVE`, `CRIT` -> 'in'; `OFF`, `FINAL` -> 'post'
+
+NHL standings are fetched separately from `api-web.nhle.com/v1/standings/now` because
+the schedule endpoint no longer includes W-L-OTL records.
+
+---
+
+### odds-api.ts
+
+Fetches and consolidates odds from Polymarket Gamma API.
+
+**Base URL:** `https://gamma-api.polymarket.com`
+
+**Key exports:**
+
+| Export | Purpose |
+|--------|---------|
+| `fetchPolymarketOdds(league)` | Fetch all active events for a sport tag |
+| `gammaEventToOddsSnapshot(event, teamCtx?)` | Convert Gamma event to OddsSnapshot |
+| `filterSnapshotsForGame(snapshots, home, away, opts?)` | Match snapshots to a specific game |
+| `consolidateOdds(snapshots)` | Pick best ML/spread/O/U from snapshot array |
+| `moneylineToImpliedProb(ml)` | American odds -> implied probability |
+| `impliedProbToMoneyline(prob)` | Implied probability -> American odds |
+| `calculatePayout(stake, ml)` | Win amount from American odds |
+| `calculateEV(ourProb, odds, stake)` | Expected value calculation |
+| `calculateKellyFraction(ourProb, odds, multiplier?)` | Half-Kelly bet sizing |
+| `devig(homeImplied, awayImplied)` | Remove vig from implied probabilities |
+| `emptyConsolidatedOdds(gameId)` | Empty odds object for games with no market |
+
+**Polymarket Gamma API call:**
+```
+GET /events?active=true&closed=false&limit=200&tag={tag}
+```
+Tags: `basketball` (NBA), `hockey` (NHL), `baseball` (MLB).
+
+**Gamma event structure:**
+- `event.slug`: `nba-sas-mil-2026-03-28` (away-home-date order)
+- `event.markets[]`: array with `sportsMarketType` ('moneyline', 'spreads', 'totals')
+- `market.outcomePrices`: JSON string like `["0.54","0.46"]` or real array
+- `market.outcomes`: team names or "Over"/"Under"
+- Sports moneyline slugs list away team first in `outcomePrices`
+
+**Game matching strategy (3 tiers):**
+1. Slug match: parse league prefix + team codes from slug + optional date
+2. Token match: find both team name tokens in snapshot gameId + eventTitle
+3. Legacy loose match: any team word in the slug ID
+
+---
+
+### polymarket-sports-slug.ts
+
+Resolves team display names to Polymarket 2-3 letter codes and validates slug patterns.
+
+**Exports:**
+
+| Function | Purpose |
+|----------|---------|
+| `normalizePolymarketCalendarDate(value)` | Extract YYYY-MM-DD from various date formats |
+| `resolvePolymarketTeamCode(league, displayName)` | Map display name to lowercase abbreviation |
+| `polymarketSlugMatchesTeamsAndDate(slug, league, codeHome, codeAway, gameDate?)` | Validate slug contains both teams + date |
+
+---
+
+### date-utils.ts
+
+All date logic uses Eastern Time to match game schedules.
+
+**Exports:**
+
+| Function | Returns | Purpose |
+|----------|---------|---------|
+| `getTodayET()` | `string` (YYYY-MM-DD) | Current ET calendar date |
+| `getTomorrowET()` | `string` (YYYY-MM-DD) | Next ET calendar date |
+| `getYesterdayET()` | `string` (YYYY-MM-DD) | Previous ET calendar date |
+| `addEtCalendarDays(etYmd, delta)` | `string` (YYYY-MM-DD) | Add/subtract days from ET date |
+| `utcIsoRangeForEtCalendarDay(etYmd)` | `{ startIso, endIso }` | Half-open UTC range for an ET day |
+| `utcIsoRangeForEtCalendarRangeInclusive(from, to)` | `{ startIso, endIso }` | UTC range spanning multiple ET days |
+
+---
+
+### moon-phase.ts
+
+Approximate lunar phase using synodic month from a known new-moon epoch
+(Jan 6, 2000 18:14 UTC). Accurate to +/- 1 day.
+
+**Exports:**
+
+| Function | Purpose |
+|----------|---------|
+| `getMoonIllumination(date)` | Returns 0 (new) to 1 (full) illumination fraction |
+| `isFullMoon(dateStr)` | True when illumination >= 98% |
+| `getFullMoonName(dateStr)` | Traditional name (Wolf, Snow, Worm...) or null |
+
+---
+
+### supabase.ts
+
+Browser-side Supabase client using anon key. Lazy-initialized singleton.
+
+```typescript
+getSupabase(): SupabaseClient
+```
+
+Uses `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
+**Only for client-side reads.** Do NOT use for server writes.
+
+---
+
+### supabase-server.ts
+
+Server-side Supabase client using service role key. Lazy-initialized singleton.
+
+```typescript
+getSupabaseAdmin(): SupabaseClient
+```
+
+Uses `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_KEY`.
+**Required for ALL server-side writes.** Bypasses RLS.
+
+---
+
+### auth.ts
+
+HMAC session cookie management with 24-hour expiry.
+
+**Exports:**
+
+| Function | Purpose |
+|----------|---------|
+| `verifyPassword(password)` | Compare against `APP_PASSWORD` env var |
+| `createSessionToken()` | Create `payload.signature` token (base64url + HMAC-SHA256) |
+| `verifySessionToken(token)` | Verify signature and check expiry |
+| `sessionCookieOptions(isProduction)` | Cookie config object |
+| `COOKIE_NAME` | `'gematria-session'` |
+
+---
+
+### constants/index.ts
+
+Team database aggregator. Re-exports all team arrays and lookup functions.
+
+**Exports:**
+
+| Export | Purpose |
+|--------|---------|
+| `NBA_TEAMS` | 30 NBA TeamInfo objects |
+| `NHL_TEAMS` | 32 NHL TeamInfo objects |
+| `MLB_TEAMS` | 30 MLB TeamInfo objects |
+| `ALL_TEAMS` | Combined array |
+| `findTeam(query, league?)` | Find by fullName, city, teamName, abbreviation, or alternateNames |
+| `findNBATeam(query)` | NBA-specific lookup |
+| `findNHLTeam(query)` | NHL-specific lookup |
+| `findMLBTeam(query)` | MLB-specific lookup |
+| `getTeamNameVariations(team)` | All searchable name forms including venue words |
+
+**TeamInfo interface:**
+```typescript
+interface TeamInfo {
+  id: string;
+  league: 'NBA' | 'NHL' | 'MLB';
+  fullName: string;        // "Golden State Warriors"
+  city: string;            // "Golden State"
+  teamName: string;        // "Warriors"
+  abbreviation: string;    // "GSW"
+  venue: string;           // "Chase Center"
+  venueCity: string;       // "San Francisco, CA"
+  areaCodes: number[];     // [415, 628]
+  espnId?: string;
+  mlbTeamId?: number;
+  conference: string;
+  division: string;
+  alternateNames?: string[];  // ["San Francisco", "GS Warriors"]
+}
+```
+
+Team name from ESPN `displayName` MUST match what `findTeam()` can resolve.
+If a team is renamed or relocated, update the constants file first.
+
+---
+
+## 4. API Route Reference
+
+### POST /api/analyze
+
+**Purpose:** Run Claude analysis on all unanalyzed games for today, auto-place bets.
+
+**Request:** No body required.
+
+**Response:** Server-Sent Events (SSE) stream.
+
+Event shapes:
+```json
+{ "game": 1, "total": 12, "status": "analyzing", "teams": "Celtics at Lakers" }
+{ "game": 1, "total": 12, "status": "complete", "teams": "...", "lockType": "triple_lock", "confidence": 75 }
+{ "game": 1, "total": 12, "status": "error", "teams": "...", "error": "..." }
+{ "done": true, "analyzed": 12, "betsPlaced": 3, "errors": [] }
+```
+
+**Flow:**
+1. Load `gematria_settings` (id=1)
+2. Query games where `game_date = today AND analyzed = false`
+3. Get latest bankroll balance from `bankroll_ledger`
+4. Sum today's units from `paper_trades`
+5. For each game: call `analyzeGameWithClaude`, check auto-bet settings, validate with
+   `canPlaceBet`, insert `paper_trades`, deduct balance
+6. Mark game as `analyzed = true`
+7. Upsert `bankroll_ledger` for today
+8. Close SSE stream
+
+**Important:** Each game is wrapped in its own try/catch. One failure does NOT crash
+the batch. Errors are collected and sent in the final SSE event.
+
+`maxDuration = 300` (5 minutes for Vercel).
+
+---
+
+### GET /api/fetch-games
+
+**Purpose:** Load games from database for a date.
+
+**Query params:** `?date=YYYY-MM-DD` (defaults to today ET)
+
+**Response:**
+```json
+{ "games": [Game, ...] }
+```
+
+### POST /api/fetch-games
+
+**Purpose:** Fetch from ESPN/NHL/MLB APIs, upsert to DB, fetch + match Polymarket odds.
+
+**Response:**
+```json
+{
+  "success": true,
+  "date": "2026-04-08",
+  "games": { "nba": 8, "nhl": 6, "mlb": 12 },
+  "oddsMatched": 15,
+  "total": 26
+}
+```
+
+**Flow:**
+1. Fetch all 3 leagues in parallel
+2. Map to DB rows (`id` = ESPN/NHL game ID)
+3. Upsert with `onConflict: 'id'`
+4. Fetch Polymarket odds for all 3 leagues
+5. For each game, find matching odds via `filterSnapshotsForGame`, consolidate,
+   and update `polymarket_odds` JSONB column
+
+---
+
+### POST /api/settle
+
+**Purpose:** Settlement sweep — check final scores and settle pending trades.
+
+**Response:**
+```json
+{
+  "success": true,
+  "settled": 5,
+  "stillPending": 3,
+  "results": { "wins": 3, "losses": 1, "pushes": 1 },
+  "dailyPL": 450,
+  "newBalance": 10450
+}
+```
+
+**Flow:**
+1. Load all pending trades with game data (join)
+2. Collect unique game dates
+3. For each date, fetch fresh scores from ESPN/NHL/MLB
+4. For each trade with a final game: determine result, compute P&L, update trade row
+5. Settlement uses optimistic concurrency: `.eq('result', 'pending')` on UPDATE
+6. Update `bankroll_ledger` with new balance and daily P&L
+
+---
+
+### POST /api/calculate
+
+**Purpose:** Compute gematria for text or date numerology.
+
+**Request body (text mode):**
+```json
+{ "text": "Warriors" }
+```
+
+**Response:**
+```json
+{ "type": "text", "values": { "ordinal": 102, "reduction": 39, "reverseOrdinal": 132, "reverseReduction": 51 } }
+```
+
+**Request body (date mode):**
+```json
+{ "date": "2026-04-08" }
+```
+
+**Response:**
+```json
+{ "type": "date", "values": { "fullDate": 58, "reducedYear": 22, "singleDigits": 22, "shortYear": 38, "monthDay": 12, "rootNumber": 4 } }
+```
+
+---
+
+### GET /api/settings
+
+**Purpose:** Load `gematria_settings` singleton (id=1).
+
+**Response:** Full `GematriaSettings` object.
+
+### PUT /api/settings
+
+**Purpose:** Update `gematria_settings`.
+
+**Request body:** Partial `GematriaSettings` fields to update.
+
+**Response:**
+```json
+{ "success": true, "settings": { ... } }
+```
+
+---
+
+### POST /api/auth/login
+
+**Purpose:** Authenticate with password, set session cookie.
+
+**Request body:**
+```json
+{ "password": "..." }
+```
+
+**Response:** 200 with `Set-Cookie: gematria-session=...` or 401.
+
+---
+
+### GET /api/trades/live
+
+**Purpose:** Pending trades with bankroll snapshot.
+
+**Response:**
+```json
+{
+  "trades": [PaperTrade with game join, ...],
+  "bankroll": { "balance": 10000, "atRisk": 500, "pendingCount": 5, "potentialWin": 750 }
+}
+```
+
+---
+
+### GET /api/trades/history
+
+**Purpose:** Settled trades with filters and summary.
+
+**Query params:**
+- `league`: NBA, NHL, MLB
+- `result`: win, loss, push
+- `days`: number or "all"
+
+**Response:**
+```json
+{
+  "trades": [PaperTrade with game join, ...],
+  "summary": { "total": 50, "wins": 28, "losses": 20, "pushes": 2, "netPL": 1250, "roi": 8.5, "winRate": 58.3, "totalWagered": 14700 }
+}
+```
+
+Win rate is computed as `wins / (wins + losses)` — pushes excluded.
+
+---
+
+### GET /api/trades/stats
+
+**Purpose:** Full performance stats with equity curve and breakdowns.
+
+**Response:**
+```json
+{
+  "balance": 11250,
+  "roi": 8.5,
+  "winRate": 58.3,
+  "record": "28W-20L",
+  "totalWagered": 14700,
+  "equityCurve": [LedgerRow, ...],
+  "byLeague": { "NBA": GroupStats, "NHL": GroupStats },
+  "byBetType": { "moneyline": GroupStats, "over_under": GroupStats },
+  "byLockType": { "triple_lock": GroupStats, "double_lock": GroupStats }
+}
+```
+
+---
+
+## 5. Page Reference
+
+### / (Dashboard) — `app/page.tsx`
+
+Client component. The main control panel.
+
+**Data fetched:**
+- `GET /api/trades/live` — pending trades
+- `GET /api/fetch-games?date={today}` — today's games
+
+**Displays:**
+- Date header with day name
+- Numerology strip (Full, Reduced Year, Single Digits, Short Year, Month+Day, Moon)
+- Stats row (Games count, Analyzed count, Bets count)
+- Action buttons: Fetch Games (POST /api/fetch-games), Analyze & Bet (POST /api/analyze),
+  Settle Bets (POST /api/settle)
+- League filter (ALL / NBA / NHL / MLB) with counts
+- Game card grid (GameCard components)
+
+**SSE handling:** The Analyze button reads an SSE stream, updating progress in real time.
+
+---
+
+### /live — `app/live/page.tsx`
+
+**Data fetched:** `GET /api/trades/live`
+
+**Displays:** Bankroll strip (Balance, At Risk, Pending, Potential Win) + TradeCard list.
+
+---
+
+### /history — `app/history/page.tsx`
+
+**Data fetched:** `GET /api/trades/history` with filter params.
+
+**Displays:** Summary stats row + filter controls (league, result, days) + TradeCard list.
+
+---
+
+### /stats — `app/stats/page.tsx`
+
+**Data fetched:** `GET /api/trades/stats`
+
+**Displays:** Top stats (Balance, Record, Win Rate, ROI, Wagered) + EquityCurve chart +
+three breakdown tables (By League, By Lock Type, By Bet Type).
+
+---
+
+### /settings — `app/settings/page.tsx`
+
+**Data fetched:** `GET /api/settings` on mount. `PUT /api/settings` on save.
+
+**Sections:**
+1. System Prompt (textarea) and Bet Rules (textarea)
+2. AI Model selector (Sonnet 4 / Opus 4 / Haiku 4)
+3. Bet Sizing (max units/bet, max daily units, unit size, min confidence)
+4. Auto-Bet Lock Types (toggles for triple/double/single)
+5. Bankroll (starting amount + reset button)
+
+---
+
+### /cipher-lab — `app/cipher-lab/page.tsx`
+
+**Data fetched:** None (pure client-side computation).
+
+**Displays:** Two panels — Word/Phrase Decoder (input + 4 cipher values) and
+Date Numerology (date picker + 5 date values). Matching values are highlighted
+with accent ring. Match list shown below.
+
+---
+
+### /login — `app/login/page.tsx`
+
+**Data fetched:** `POST /api/auth/login` on submit.
+
+**Displays:** Password input with submit button. Redirects to `/` on success.
+
+---
+
+## 6. Component Reference
+
+### Nav — `components/Nav.tsx`
+
+**Props:** None.
+
+**Links:** Dashboard, Live, History, Stats, Settings, Cipher Lab.
+
+Active link detection: exact match for `/`, prefix match for others.
+Sticky top bar with blur backdrop.
+
+---
+
+### GameCard — `components/GameCard.tsx`
+
+**Props:**
+```typescript
+interface GameCardProps {
+  game: Game;
+  trade?: PaperTrade;  // Optional pending trade for this game
+}
+```
+
+Shows league badge, status/time, teams, score (if live/final), venue, lock badge,
+confidence, odds strip, and trade info if present.
+
+---
+
+### LockBadge — `components/LockBadge.tsx`
+
+**Props:**
+```typescript
+interface LockBadgeProps {
+  lockType: LockType | string | null;
+  size?: 'sm' | 'md';
+}
+```
+
+Renders colored badge with icon. Falls back to `no_lock` config for unknown types.
+
+---
+
+### StatCard — `components/StatCard.tsx`
+
+**Props:**
+```typescript
+interface StatCardProps {
+  label: string;
+  value: string | number;
+  prefix?: string;
+  color?: 'default' | 'success' | 'danger';
+}
+```
+
+---
+
+### TradeCard — `components/TradeCard.tsx`
+
+**Props:**
+```typescript
+interface TradeCardProps {
+  trade: PaperTrade;
+}
+```
+
+Shows game info, pick, lock badge, result badge, odds, P&L. Expandable reasoning section.
+Left border color indicates result (warning=pending, success=win, danger=loss).
+
+---
+
+### EquityCurve — `components/EquityCurve.tsx`
+
+**Props:**
+```typescript
+interface EquityCurveProps {
+  data: LedgerRow[];
+  startBalance?: number;  // default 10000
+}
+```
+
+Recharts AreaChart with gradient fill. Reference line at starting balance.
+
+---
+
+### ProgressBar — `components/ProgressBar.tsx`
+
+**Props:**
+```typescript
+interface ProgressBarProps {
+  current: number;
+  total: number;
+  label?: string;
+}
+```
+
+---
+
+## 7. Database Schema
+
+### Table: games
+
+| Column | Type | Nullable | Default | Purpose |
+|--------|------|----------|---------|---------|
+| `id` | text | NO | — | PK, ESPN/NHL game ID |
+| `league` | text | NO | — | 'NBA', 'NHL', or 'MLB' |
+| `game_date` | text | NO | — | YYYY-MM-DD in ET |
+| `home_team` | text | NO | — | ESPN displayName |
+| `away_team` | text | NO | — | ESPN displayName |
+| `home_score` | integer | YES | null | Final/live score |
+| `away_score` | integer | YES | null | Final/live score |
+| `status` | text | NO | 'scheduled' | 'scheduled', 'pre', 'in_progress', 'final' |
+| `venue` | text | YES | null | Arena/stadium name |
+| `start_time` | text | YES | null | ISO timestamp |
+| `home_record` | text | YES | null | "W-L" or "W-L-OTL" |
+| `away_record` | text | YES | null | "W-L" or "W-L-OTL" |
+| `home_wins` | integer | NO | 0 | Season wins |
+| `away_wins` | integer | NO | 0 | Season wins |
+| `home_losses` | integer | YES | null | Season losses |
+| `away_losses` | integer | YES | null | Season losses |
+| `polymarket_odds` | jsonb | YES | null | Cached ConsolidatedOdds |
+| `is_full_moon` | boolean | NO | false | Moon phase flag |
+| `analyzed` | boolean | NO | false | True after Claude processes |
+| `created_at` | timestamp | YES | now() | Row creation |
+| `updated_at` | timestamp | YES | now() | Last update |
+
+**Read by:** fetch-games GET, analyze, settle, trades/live, trades/history, trades/stats
+**Written by:** fetch-games POST (upsert), analyze (update analyzed flag), settle (update scores)
+
+---
+
+### Table: paper_trades
+
+| Column | Type | Nullable | Default | Purpose |
+|--------|------|----------|---------|---------|
+| `id` | uuid | NO | gen_random_uuid() | PK |
+| `game_id` | text | NO | — | FK to games.id |
+| `bet_type` | text | NO | — | 'moneyline' or 'over_under' |
+| `pick` | text | NO | — | Team name or "Over/Under X.X" |
+| `picked_side` | text | YES | null | 'home' or 'away' |
+| `odds` | numeric | YES | null | American odds at time of bet |
+| `implied_probability` | numeric | YES | null | Market implied prob |
+| `model_probability` | numeric | YES | null | Claude's probability estimate |
+| `ev` | numeric | YES | null | Expected value |
+| `units` | numeric | NO | — | Bet size in units |
+| `stake` | numeric | NO | — | Dollar amount wagered |
+| `potential_profit` | numeric | YES | null | Max win amount |
+| `result` | text | NO | 'pending' | 'pending', 'win', 'loss', 'push', 'void' |
+| `profit_loss` | numeric | NO | 0 | Settled dollar P&L |
+| `confidence` | numeric | YES | null | Claude confidence 0-100 |
+| `lock_type` | text | YES | null | Lock classification |
+| `reasoning` | text | YES | null | Claude explanation |
+| `placed_at` | timestamp | NO | — | When bet was placed |
+| `settled_at` | timestamp | YES | null | When result was determined |
+
+**Read by:** trades/live, trades/history, trades/stats, analyze (today's units), settle
+**Written by:** analyze (insert), settle (update result/profit_loss/settled_at)
+
+---
+
+### Table: bankroll_ledger
+
+| Column | Type | Nullable | Default | Purpose |
+|--------|------|----------|---------|---------|
+| `id` | uuid | NO | gen_random_uuid() | PK |
+| `date` | text | NO | — | YYYY-MM-DD, UNIQUE |
+| `balance` | numeric | NO | — | End-of-day balance |
+| `daily_pl` | numeric | NO | 0 | Day's profit/loss |
+| `wins` | integer | NO | 0 | Day's win count |
+| `losses` | integer | NO | 0 | Day's loss count |
+| `bets_placed` | integer | NO | 0 | Day's bets placed |
+
+**Read by:** analyze (latest balance), settle (latest balance), trades/live, trades/stats
+**Written by:** analyze (upsert), settle (upsert)
+
+---
+
+### Table: gematria_settings
+
+| Column | Type | Nullable | Default | Purpose |
+|--------|------|----------|---------|---------|
+| `id` | integer | NO | 1 | PK (singleton) |
+| `system_prompt` | text | NO | '' | Claude system instructions |
+| `bet_rules` | text | NO | '' | Additional bet placement rules |
+| `model` | text | NO | 'claude-sonnet-4-20250514' | Claude model identifier |
+| `max_units_per_bet` | integer | NO | 5 | Max units on a single bet |
+| `max_daily_units` | integer | NO | 20 | Max total units per day |
+| `unit_size` | numeric | NO | 100 | Dollar value per unit |
+| `min_confidence` | integer | NO | 60 | Minimum Claude confidence to bet |
+| `auto_bet_triple_locks` | boolean | NO | true | Auto-bet triple lock games |
+| `auto_bet_double_locks` | boolean | NO | false | Auto-bet double lock games |
+| `auto_bet_single_locks` | boolean | NO | false | Auto-bet single lock games |
+| `starting_bankroll` | numeric | NO | 10000 | Starting bankroll amount |
+
+**Read by:** analyze, settings GET
+**Written by:** settings PUT
+
+---
+
+## 8. External API Contracts
+
+### ESPN NBA Scoreboard
+
+```
+GET https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=YYYYMMDD
+```
+
+Response parsing:
+```
+data.events[] -> each is a game
+  .id -> game ID (string)
+  .date -> ISO start time
+  .competitions[0]
+    .competitors[] -> { homeAway: 'home'|'away', team: { displayName, abbreviation, id }, score, records: [{ summary: 'W-L' }] }
+    .venue -> { fullName, address: { city, state } }
+    .status -> { type: { state: 'pre'|'in'|'post' }, period, displayClock }
+```
+
+### ESPN MLB Scoreboard
+
+Same format as NBA at:
+```
+GET https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard?dates=YYYYMMDD
+```
+
+Additional: postponed/suspended games (`status.type.name` = `STATUS_POSTPONED` or
+`STATUS_SUSPENDED`) are filtered out and return `null` (removed by `.filter(Boolean)`).
+
+### NHL Schedule
+
+```
+GET https://api-web.nhle.com/v1/schedule/YYYY-MM-DD
+```
+
+Response parsing:
+```
+data.gameWeek[] -> { date: 'YYYY-MM-DD', games: [...] }
+  games[].id -> game ID (number, used as string)
+  games[].startTimeUTC -> ISO timestamp
+  games[].gameState -> 'FUT'|'PRE'|'LIVE'|'CRIT'|'OFF'|'FINAL'
+  games[].homeTeam / awayTeam -> { id, placeName.default, commonName.default, abbrev, score }
+  games[].venue.default -> arena name
+```
+
+### NHL Standings
+
+```
+GET https://api-web.nhle.com/v1/standings/now
+```
+
+Response parsing:
+```
+data.standings[] -> { teamAbbrev.default, wins, losses, otLosses }
+```
+
+Cached for 10 minutes in `nhlStandingsCache`.
+
+### Polymarket Gamma Events
+
+```
+GET https://gamma-api.polymarket.com/events?active=true&closed=false&limit=200&tag={tag}
+```
+
+Tags: `basketball`, `hockey`, `baseball`
+
+Response: array of event objects, each with:
+```
+event.slug -> e.g. 'nba-sas-mil-2026-03-28'
+event.title -> e.g. 'San Antonio Spurs vs Milwaukee Bucks'
+event.markets[] -> [{ sportsMarketType, outcomePrices, outcomes, line, active, closed }]
+```
+
+`outcomePrices` can be a JSON string `'["0.54","0.46"]'` or a real array.
+`outcomes` can also be a JSON string. Always parse defensively.
+
+### Anthropic Claude Messages API
+
+```typescript
+const client = new Anthropic();
+const response = await client.messages.create({
+  model: settings.model,   // e.g. 'claude-sonnet-4-20250514'
+  max_tokens: 2048,
+  system: systemMessage,
+  messages: [{ role: 'user', content: userMessage }],
+});
+const text = response.content.find(b => b.type === 'text')?.text;
+```
+
+Requires `ANTHROPIC_API_KEY` environment variable.
+
+---
+
+## 9. Gematria Cipher Math — Full Reference
+
+### Cipher 1: Ordinal (English Ordinal)
+
+Each letter maps to its position in the alphabet.
+
+```
+A=1   B=2   C=3   D=4   E=5   F=6   G=7   H=8   I=9
+J=10  K=11  L=12  M=13  N=14  O=15  P=16  Q=17  R=18
+S=19  T=20  U=21  V=22  W=23  X=24  Y=25  Z=26
+```
+
+Example: "NBA" = 14 + 2 + 1 = 17
+
+### Cipher 2: Reduction (Pythagorean)
+
+Letters cycle through 1-9 repeatedly.
+
+```
+A=1  B=2  C=3  D=4  E=5  F=6  G=7  H=8  I=9
+J=1  K=2  L=3  M=4  N=5  O=6  P=7  Q=8  R=9
+S=1  T=2  U=3  V=4  W=5  X=6  Y=7  Z=8
+```
+
+Example: "NBA" = 5 + 2 + 1 = 8
+
+### Cipher 3: Reverse Ordinal
+
+Alphabet reversed: A=26, B=25, ... Z=1.
+
+```
+A=26  B=25  C=24  D=23  E=22  F=21  G=20  H=19  I=18
+J=17  K=16  L=15  M=14  N=13  O=12  P=11  Q=10  R=9
+S=8   T=7   U=6   V=5   W=4   X=3   Y=2   Z=1
+```
+
+Example: "NBA" = 13 + 25 + 26 = 64
+
+### Cipher 4: Reverse Reduction
+
+Reverse ordinal values reduced to 1-9.
+
+```
+A=8  B=7  C=6  D=5  E=4  F=3  G=2  H=1  I=9
+J=8  K=7  L=6  M=5  N=4  O=3  P=2  Q=1  R=9
+S=8  T=7  U=6  V=5  W=4  X=3  Y=2  Z=1
+```
+
+Example: "NBA" = 4 + 7 + 8 = 19
+
+### Date Numerology Calculation
+
+For date April 8, 2026 (4/8/2026):
+
+| Method | Formula | Result |
+|--------|---------|--------|
+| Full Date | 4 + 8 + 20 + 26 | 58 |
+| Reduced Year | 4 + 8 + (2+0+2+6) | 22 |
+| Single Digits | (4) + (8) + (2+0+2+6) | 22 |
+| Short Year | 4 + 8 + 26 | 38 |
+| Month+Day | 4 + 8 | 12 |
+| Root Number | reduce(22) = 2+2 | 4 |
+| Calendar Day | 8 | 8 |
+| Calendar Month | 4 | 4 |
+
+### Alignment Detection
+
+An **alignment** occurs when any cipher value of a team name equals any date
+numerology value. The cipher value must be > 0 (non-letters produce 0).
+
+**Lock classification** counts the maximum non-market alignments on either side:
+- 3+ alignments = Triple Lock (strongest signal)
+- 2 alignments = Double Lock
+- 1 alignment = Single Lock
+- 0 alignments = Skip (no bet)
+
+**Conflict skip:** If both sides have alignments AND the weighted score gap is < 15,
+the game is downgraded to Skip regardless of alignment count.
+
+---
+
+## 10. Claude Agent Protocol
+
+### System Message Construction
+
+The system message is built from three parts concatenated with `\n\n`:
+1. `settings.system_prompt` — user-written instructions
+2. `settings.bet_rules` — user-written constraints
+3. Hard-coded JSON format instructions (response schema)
+
+### User Message Structure
+
+```
+=== GAME ===
+{away_team} @ {home_team}
+League: {league} | Date: {game_date}
+Venue: {venue}
+Records: Home {record} | Away {record}
+Moon: {illumination}% illumination {(FULL MOON) if applicable}
+
+=== DATE NUMEROLOGY ===
+Full: {full} | Reduced Year: {reducedYear} | Single Digits: {singleDigits}
+Short Year: {shortYear} | Month+Day: {monthDay}
+Root Number: {rootNumber} | Calendar Day: {calendarDay} | Calendar Month: {calendarMonth}
+
+=== HOME TEAM CIPHERS ({home_team}) ===
+  City ({city}): Ord {n} | Red {n} | RevOrd {n} | RevRed {n}
+  Team ({teamName}): Ord {n} | Red {n} | RevOrd {n} | RevRed {n}
+  Full ({fullName}): Ord {n} | Red {n} | RevOrd {n} | RevRed {n}
+  {Stars, Goalie, Coach if present}
+
+=== HOME TEAM ALIGNMENTS ===
+  {bullet list of alignments with type, cipher, value, date method}
+
+=== AWAY TEAM CIPHERS / ALIGNMENTS ===
+  {same format}
+
+=== GEMATRIA SUMMARY ===
+Lock Type: {TRIPLE LOCK|DOUBLE LOCK|SINGLE LOCK|SKIP}
+Home Alignments: {count}
+Away Alignments: {count}
+Confidence: {pct}%
+Favored Side: {home|away|Neither}
+
+=== ODDS ===
+Moneyline: Home +/-{n} / Away +/-{n}
+Implied: Home {pct}% / Away {pct}%
+Spread: {line}
+O/U: {line} (Over +/-{n}) (Under +/-{n})
+```
+
+### Expected Response Format
+
+Claude must return a JSON array of TradeDecision objects:
+```json
+[{
+  "action": "bet",
+  "betType": "moneyline",
+  "pick": "Boston Celtics",
+  "pickedSide": "home",
+  "odds": -150,
+  "impliedProbability": 0.6,
+  "modelProbability": 0.68,
+  "ev": 0.13,
+  "units": 3,
+  "confidence": 75,
+  "reasoning": "Triple lock with strong city alignment..."
+}]
+```
+
+For a skip: `[{ "action": "skip", ... }]`
+
+---
+
+## 11. Paper Trading Rules
+
+### Defaults (configurable in settings)
+
+| Parameter | Default | Range |
+|-----------|---------|-------|
+| Starting bankroll | $10,000 | User-configured |
+| Unit size | $100 | Any positive number |
+| Max units per bet | 5 | 1-10 typical |
+| Max daily units | 20 | 5-50 typical |
+| Min confidence | 60 | 0-100 |
+
+### Auto-Bet Rules
+
+Bets are auto-placed during analysis when ALL conditions are met:
+1. Claude returns `action: "bet"`
+2. The lock type's auto-bet toggle is ON in settings
+3. Claude's confidence >= `min_confidence`
+4. `canPlaceBet()` returns true (balance, daily limit, per-bet limit)
+
+### Settlement Rules
+
+**Moneyline:**
+- Win: picked_side's team scored more points
+- Loss: picked_side's team scored fewer points
+- Push: scores are equal (rare in NBA/NHL, possible in MLB extra innings)
+
+**Over/Under:**
+- Parse pick string for side and line number
+- Total = home_score + away_score
+- Win: over and total > line, or under and total < line
+- Loss: opposite
+- Push: total equals line exactly
+
+**P&L Calculation:**
+- Win: `stake * (odds / 100)` for positive odds, `stake * (100 / |odds|)` for negative
+- Loss: `-stake`
+- Push: `0`
+- Void: `0`
+
+---
+
+## 12. Tailwind v4 Theme
+
+### Configuration
+
+Tailwind v4 uses `@import "tailwindcss"` + `@theme` block in `globals.css`.
+There is NO `tailwind.config.js` or `tailwind.config.ts`.
+
+PostCSS config is in `postcss.config.mjs` with `@tailwindcss/postcss`.
+
+### Theme Tokens
+
+```css
+@theme {
+  --color-bg: #0a0a0f;
+  --color-surface: #12121a;
+  --color-surface-hover: #1a1a26;
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-border-accent: rgba(167, 139, 250, 0.3);
+  --color-accent: #a78bfa;
+  --color-accent-dim: #7c3aed;
+  --color-text: #e4e4e7;
+  --color-muted: #71717a;
+  --color-success: #22c55e;
+  --color-danger: #ef4444;
+  --color-warning: #f59e0b;
+  --font-display: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, "JetBrains Mono", monospace;
+}
+```
+
+Usage in classes: `bg-bg`, `bg-surface`, `text-text`, `text-muted`, `text-accent`,
+`text-success`, `text-danger`, `text-warning`, `border-border`, `border-border-accent`.
+
+### Utility Classes
+
+```css
+.card {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+}
+
+.stat-value {
+  font-family: var(--font-mono);
+  font-size: 1.5rem;
+  line-height: 2rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+```
+
+### Font Usage
+
+- Body text: `font-[family-name:var(--font-display)]` (Inter)
+- Numbers and monospace: `font-[family-name:var(--font-mono)]` (JetBrains Mono)
+- Both fonts loaded via `next/font/google` in layout.tsx with CSS variables
+
+---
+
+## 13. Coding Conventions
+
+### Component Patterns
+
+- Server components by default. Only add `'use client'` when the component needs
+  hooks, event handlers, or browser APIs.
+- All pages are currently client components (they use `useState`/`useEffect`).
+- Components take typed props interfaces defined inline or imported from types.
+
+### API Route Patterns
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { getSupabaseAdmin } from '@/lib/supabase-server';
+
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60;  // optional, for long routes
+
+export async function GET(request: NextRequest) {
+  // ...
+  return NextResponse.json({ data });
+}
+
+export async function POST(request: NextRequest) {
+  const body = await request.json();
+  // ...
+  return NextResponse.json({ success: true });
+}
+```
+
+### Error Handling
+
+- API routes: wrap in try/catch, return `{ error: message }` with appropriate status
+- Analyze route: per-game try/catch so one failure does not abort the batch
+- Supabase queries: check `.error` property on response
+- Fetch calls: use `fetchWithRetry` for external APIs, plain `fetch` for internal
+
+### Null/Undefined Safety
+
+- Balance fallbacks: `?? 10000` (never `|| 10000` which treats 0 as falsy)
+- P&L sums: `?? 0` (never `|| 0`)
+- Win rate: `wins / (wins + losses)` (never `wins / total` which includes pushes)
+- Always check `trade.odds ?? 0` before payout calculation
+
+---
+
+## 14. Proxy (Auth Gate) — proxy.ts
+
+Next.js 16 uses `proxy.ts` instead of `middleware.ts`.
+
+**Public routes (no auth):**
+- `/login`
+- `/api/auth/*`
+- `/_next/*`
+- `/favicon.ico`
+
+**Protected API routes:** Return 401 JSON if no valid session cookie.
+
+**Protected pages:** Redirect to `/login` if no valid session cookie.
+
+**Logged-in users on /login:** Redirect to `/`.
+
+**Session verification:** Reads `gematria-session` cookie, calls `verifySessionToken`
+from `@/lib/auth` (HMAC-SHA256 signature + expiry check).
+
+---
+
+## 15. Environment Variables
+
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `NEXT_PUBLIC_SUPABASE_URL` | Yes | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Yes | Supabase anon/public key |
+| `SUPABASE_SERVICE_KEY` | Yes | Supabase service role key (server writes) |
+| `ANTHROPIC_API_KEY` | Yes | Claude API key |
+| `APP_PASSWORD` | Yes | Login password (compared directly) |
+
+---
+
+## 16. Critical Gotchas
+
+1. **proxy.ts NOT middleware.ts.** Next.js 16 changed the interception mechanism.
+   If you create a middleware.ts, it will be ignored or conflict.
+
+2. **getSupabaseAdmin() for ALL server writes.** The anon key client respects RLS.
+   All four tables have RLS enabled. Server routes MUST use the service key client.
+   Writes with the anon client will silently succeed with 0 rows affected.
+
+3. **Claude JSON needs robust parsing.** Claude frequently wraps JSON in markdown
+   code fences (`` ```json ... ``` ``) or adds explanatory text. The `robustJsonParse`
+   function handles this, but any new Claude integration must also account for it.
+
+4. **Per-game try/catch in analyze route.** The analyze route processes multiple games
+   in sequence. Each game MUST be in its own try/catch block. If one game's Claude
+   call fails (timeout, rate limit, bad response), the others must still process.
+
+5. **Vercel maxDuration: 300 for analyze route.** The analyze route can take several
+   minutes for large slates (12+ games x 10-30 seconds per Claude call). The
+   `maxDuration` export is critical for Vercel deployment.
+
+6. **ESPN uses YYYYMMDD dates, NHL uses YYYY-MM-DD.** The fetch functions handle
+   format conversion internally, but if you add new API calls, use the correct format.
+
+7. **Team names from ESPN `displayName` must match `findTeam()` constants.** If ESPN
+   changes a team name (relocation, rebrand), the constants file must be updated for
+   gematria calculation to work. Example: ESPN returns "Golden State Warriors" which
+   must match the `fullName` in `teams-nba.ts`.
+
+8. **Polymarket `outcomePrices` is often a JSON string, not an array.** Always use
+   `parseGammaOutcomePricePair` which handles both forms.
+
+9. **Settlement optimistic concurrency.** The settle route uses `.eq('result', 'pending')`
+   on UPDATE to prevent double-settling. If a race condition occurs, the second
+   settlement attempt affects 0 rows.
+
+10. **Tailwind v4 has no config file.** All theming is done via `@theme` in
+    `globals.css`. Do not create `tailwind.config.js`.
+
+---
+
+## 17. Common Tasks
+
+### Adding a new cipher
+
+1. Add the letter-value table to `gematria.ts` (follow `ORDINAL` pattern)
+2. Add the field to `GematriaResult` interface in both `gematria.ts` and `types.ts`
+3. Add it to `calculateGematria()` return object
+4. Add it to `getAllGematriaValues()` return array
+5. Add it to `findMatchingValues()` cipher entries
+6. Add it to `cipherValues()` and `CIPHER_LABELS` in `analysis-engine.ts`
+7. Add it to `formatCipherValues()` in `claude-agent.ts`
+8. Add UI for it in `cipher-lab/page.tsx`
+
+### Changing bet sizing defaults
+
+1. Update `defaults` object in `settings/page.tsx`
+2. Update the `gematria_settings` row in Supabase directly or via the settings page
+3. The analyze route reads settings from DB on each run
+
+### Adding a new league
+
+1. Create `teams-{league}.ts` in `constants/` with TeamInfo array and finder
+2. Export from `constants/index.ts`
+3. Add fetch function in `sports-api.ts`
+4. Add to `fetch-games` route parallel fetch array
+5. Add Polymarket tag mapping in `odds-api.ts` (`fetchPolymarketOdds`)
+6. Add to `settle` route score fetching
+7. Update league type in `types.ts` Game interface
+8. Update league filter buttons in dashboard and history pages
+
+### Changing Claude model
+
+Option A: Update via the Settings page UI (persists to DB).
+Option B: Update `gematria_settings.model` directly in Supabase.
+
+Available models: `claude-sonnet-4-20250514`, `claude-opus-4-6`, `claude-haiku-4-20250414`.
+
+### Resetting bankroll
+
+Option A: Use the Reset button on the Settings page.
+Option B: Manual SQL:
+```sql
+DELETE FROM bankroll_ledger;
+INSERT INTO bankroll_ledger (date, balance, daily_pl, wins, losses, bets_placed)
+VALUES (CURRENT_DATE, 10000, 0, 0, 0, 0);
+```
+
+### Debugging analysis failures
+
+1. Open browser DevTools Network tab
+2. Click "Analyze & Bet" — watch the SSE stream
+3. Each game produces an analyzing/complete/error event
+4. Error events contain the error message
+5. Check Supabase `paper_trades` table for placed bets
+6. Check `games` table for `analyzed = true` flag
+7. Common failures: Claude timeout, invalid API key, team not found in constants
+
+### Voiding a trade
+
+Direct SQL only (no UI for this):
+```sql
+UPDATE paper_trades SET result = 'void', profit_loss = 0 WHERE id = '{trade_id}';
+```
+
+---
+
+## 18. Request Flow Diagrams
+
+### Fetch + Analyze + Settle Pipeline
+
+```
+User clicks "Fetch Games"
+  -> POST /api/fetch-games
+    -> fetchNBAGames(today) + fetchNHLGames(today) + fetchMLBGames(today) [parallel]
+    -> upsert to games table
+    -> fetchPolymarketOdds('NBA') + ('NHL') + ('MLB') [parallel]
+    -> match odds to games, update polymarket_odds JSONB
+
+User clicks "Analyze & Bet"
+  -> POST /api/analyze (SSE stream)
+    -> load gematria_settings
+    -> query games where game_date=today AND analyzed=false
+    -> for each game:
+      -> analyzeGame() (deterministic cipher engine)
+      -> build Claude prompt
+      -> call Claude API
+      -> parse JSON response
+      -> if auto-bet enabled for lock type + confidence >= min:
+        -> insert paper_trades
+        -> deduct from balance
+      -> mark game analyzed=true
+    -> upsert bankroll_ledger
+
+User clicks "Settle Bets"
+  -> POST /api/settle
+    -> query paper_trades where result='pending' (join games)
+    -> for each unique game_date:
+      -> fetch fresh scores from ESPN/NHL/MLB
+    -> for each trade with final game:
+      -> determineTradeResult(trade, homeScore, awayScore)
+      -> profitLossForSettledTrade(trade, result)
+      -> update paper_trades (result, profit_loss, settled_at)
+    -> upsert bankroll_ledger
+```
+
+### Auth Flow
+
+```
+User visits any page
+  -> proxy.ts intercepts
+  -> checks gematria-session cookie
+  -> if missing/invalid: redirect to /login (pages) or 401 (API)
+
+User submits password on /login
+  -> POST /api/auth/login
+  -> compare password to APP_PASSWORD env
+  -> if match: create HMAC token, set cookie, return 200
+  -> client redirects to /
+```

@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0a0a0f;
+  --color-surface: #12121a;
+  --color-surface-hover: #1a1a26;
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-border-accent: rgba(167, 139, 250, 0.3);
+  --color-accent: #a78bfa;
+  --color-accent-dim: #7c3aed;
+  --color-text: #e4e4e7;
+  --color-muted: #71717a;
+  --color-success: #22c55e;
+  --color-danger: #ef4444;
+  --color-warning: #f59e0b;
+  --font-display: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, "JetBrains Mono", monospace;
+}
+
+@layer base {
+  html,
+  body {
+    overflow-x: hidden;
+  }
+  body {
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    font-family: var(--font-display);
+  }
+}
+
+@layer utilities {
+  .card {
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 0.75rem;
+    padding: 1.25rem;
+  }
+  .stat-value {
+    font-family: var(--font-mono);
+    font-size: 1.5rem;
+    line-height: 2rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+}

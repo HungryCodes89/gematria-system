@@ -1,0 +1,144 @@
+// Gematria Engine — Pure deterministic math, no AI
+// Four English ciphers: Ordinal (A1–Z26), Reduction (A1–Z8 cycle), Reverse Ordinal, Reverse Reduction.
+// Date methods: Full (M+D+YYcentury+YY), Reduced Year (M+D+digitSum(year)), Single Digits (all digits of M/D/Y summed),
+// Short Year (M+D+YY), Month+Day, Root (single-digit reduction of Single Digits), Calendar Day, Calendar Month.
+
+const ORDINAL: Record<string, number> = {
+  a:1,b:2,c:3,d:4,e:5,f:6,g:7,h:8,i:9,j:10,k:11,l:12,m:13,
+  n:14,o:15,p:16,q:17,r:18,s:19,t:20,u:21,v:22,w:23,x:24,y:25,z:26
+}
+
+const REDUCTION: Record<string, number> = {
+  a:1,b:2,c:3,d:4,e:5,f:6,g:7,h:8,i:9,j:1,k:2,l:3,m:4,
+  n:5,o:6,p:7,q:8,r:9,s:1,t:2,u:3,v:4,w:5,x:6,y:7,z:8
+}
+
+const REV_ORDINAL: Record<string, number> = {
+  a:26,b:25,c:24,d:23,e:22,f:21,g:20,h:19,i:18,j:17,k:16,l:15,m:14,
+  n:13,o:12,p:11,q:10,r:9,s:8,t:7,u:6,v:5,w:4,x:3,y:2,z:1
+}
+
+const REV_REDUCTION: Record<string, number> = {
+  a:8,b:7,c:6,d:5,e:4,f:3,g:2,h:1,i:9,j:8,k:7,l:6,m:5,
+  n:4,o:3,p:2,q:1,r:9,s:8,t:7,u:6,v:5,w:4,x:3,y:2,z:1
+}
+
+export interface GematriaResult {
+  text: string
+  ordinal: number
+  reduction: number
+  reverseOrdinal: number
+  reverseReduction: number
+}
+
+export interface DateNumerology {
+  date: string
+  full: number           // month + day + first2OfYear + last2OfYear (e.g. 3+28+20+26=77)
+  reducedYear: number    // month + day + digitSum(year) (e.g. 3+28+10=41 for 2026)
+  singleDigits: number   // digitSum(month)+digitSum(day)+digitSum(year) (e.g. 3+10+10=23)
+  shortYear: number      // month + day + last2OfYear (e.g. 3+28+26=57)
+  monthDay: number       // month + day (e.g. 3+28=31)
+  rootNumber: number     // singleDigits reduced to one digit (e.g. 23→5)
+  calendarDay: number    // 1–31; matches e.g. "Under" reduction to that day
+  calendarMonth: number  // 1–12
+}
+
+function sumLetters(text: string, table: Record<string, number>): number {
+  return text.toLowerCase().split('').reduce((sum, ch) => sum + (table[ch] || 0), 0)
+}
+
+export function calculateGematria(text: string): GematriaResult {
+  return {
+    text,
+    ordinal: sumLetters(text, ORDINAL),
+    reduction: sumLetters(text, REDUCTION),
+    reverseOrdinal: sumLetters(text, REV_ORDINAL),
+    reverseReduction: sumLetters(text, REV_REDUCTION),
+  }
+}
+
+function digitSum(n: number): number {
+  return String(Math.abs(n)).split('').reduce((s, d) => s + parseInt(d), 0)
+}
+
+function reduceToSingleDigit(n: number): number {
+  while (n > 9) n = digitSum(n)
+  return n
+}
+
+export function calculateDateNumerology(date: Date): DateNumerology {
+  const month = date.getMonth() + 1
+  const day = date.getDate()
+  const year = date.getFullYear()
+  const yearStr = String(year)
+  const first2 = parseInt(yearStr.slice(0, 2))
+  const last2 = parseInt(yearStr.slice(2))
+  const yearDigitSum = digitSum(year)
+
+  const full = month + day + first2 + last2
+  const reducedYear = month + day + yearDigitSum
+  const singleDigits = digitSum(month) + digitSum(day) + digitSum(year)
+  const shortYear = month + day + last2
+  const monthDay = month + day
+  const rootNumber = reduceToSingleDigit(singleDigits)
+  const calendarDay = day
+  const calendarMonth = month
+
+  const dateStr = `${month}/${day}/${year}`
+
+  return { date: dateStr, full, reducedYear, singleDigits, shortYear, monthDay, rootNumber, calendarDay, calendarMonth }
+}
+
+export function getAllGematriaValues(result: GematriaResult): number[] {
+  return [result.ordinal, result.reduction, result.reverseOrdinal, result.reverseReduction]
+}
+
+export function getAllDateValues(numerology: DateNumerology): number[] {
+  return [
+    numerology.full,
+    numerology.reducedYear,
+    numerology.singleDigits,
+    numerology.shortYear,
+    numerology.monthDay,
+    numerology.rootNumber,
+    numerology.calendarDay,
+    numerology.calendarMonth,
+  ]
+}
+
+export function findMatchingValues(
+  gematria: GematriaResult,
+  dateNums: DateNumerology
+): { cipher: string; value: number; dateMethod: string; dateValue: number }[] {
+  const matches: { cipher: string; value: number; dateMethod: string; dateValue: number }[] = []
+
+  const cipherEntries: [string, number][] = [
+    ['Ordinal', gematria.ordinal],
+    ['Reduction', gematria.reduction],
+    ['Reverse Ordinal', gematria.reverseOrdinal],
+    ['Reverse Reduction', gematria.reverseReduction],
+  ]
+
+  const dateEntries: [string, number][] = [
+    ['Full', dateNums.full],
+    ['Reduced Year', dateNums.reducedYear],
+    ['Single Digits', dateNums.singleDigits],
+    ['Short Year', dateNums.shortYear],
+    ['Month+Day', dateNums.monthDay],
+    ['Root', dateNums.rootNumber],
+    ['Calendar Day', dateNums.calendarDay],
+    // Calendar Month omitted from auto-match (small integers = noisy); use calculator if needed.
+  ]
+
+  for (const [cipher, cVal] of cipherEntries) {
+    for (const [method, dVal] of dateEntries) {
+      if (cVal === dVal && cVal > 0) {
+        matches.push({ cipher, value: cVal, dateMethod: method, dateValue: dVal })
+      }
+    }
+  }
+
+  return matches
+}
+
+export { ORDINAL, REDUCTION, REV_ORDINAL, REV_REDUCTION }

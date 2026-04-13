@@ -1,0 +1,178 @@
+// ── Game (DB row) ──
+
+export interface Game {
+  id: string;
+  league: "NBA" | "NHL" | "MLB";
+  game_date: string;
+  home_team: string;
+  away_team: string;
+  home_score: number | null;
+  away_score: number | null;
+  status: "scheduled" | "pre" | "in_progress" | "final";
+  venue: string | null;
+  start_time: string | null;
+  home_record: string | null;
+  away_record: string | null;
+  home_wins: number;
+  away_wins: number;
+  home_losses: number | null;
+  away_losses: number | null;
+  polymarket_odds: ConsolidatedOdds | null;
+  is_full_moon: boolean;
+  analyzed: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+// ── Odds (cached on game row as JSONB) ──
+
+export interface ConsolidatedOdds {
+  moneylineHome: number | null;
+  moneylineAway: number | null;
+  spreadLine: number | null;
+  spreadHomeOdds: number | null;
+  spreadAwayOdds: number | null;
+  overUnderLine: number | null;
+  overOdds: number | null;
+  underOdds: number | null;
+  impliedProbHome: number | null;
+  impliedProbAway: number | null;
+}
+
+// ── Trade Decision (Claude output) ──
+
+export interface TradeDecision {
+  action: "bet" | "skip";
+  betType: "moneyline" | "over_under";
+  pick: string;
+  pickedSide: "home" | "away" | null;
+  odds: number;
+  impliedProbability: number;
+  modelProbability: number;
+  ev: number;
+  units: number;
+  confidence: number;
+  reasoning: string;
+}
+
+// ── Paper Trade (DB row) ──
+
+export interface PaperTrade {
+  id: string;
+  game_id: string;
+  bot: "A" | "B" | "C";
+  bet_type: "moneyline" | "over_under";
+  pick: string;
+  picked_side: "home" | "away" | null;
+  odds: number | null;
+  implied_probability: number | null;
+  model_probability: number | null;
+  ev: number | null;
+  units: number;
+  stake: number;
+  potential_profit: number | null;
+  result: "pending" | "win" | "loss" | "push" | "void";
+  profit_loss: number;
+  confidence: number | null;
+  lock_type: string | null;
+  reasoning: string | null;
+  placed_at: string;
+  settled_at: string | null;
+  game?: Game;
+}
+
+// ── Bankroll Ledger Row ──
+
+export interface LedgerRow {
+  id: string;
+  date: string;
+  balance: number;
+  daily_pl: number;
+  wins: number;
+  losses: number;
+  bets_placed: number;
+}
+
+// ── Gematria Settings (singleton) ──
+
+export interface GematriaSettings {
+  // Bot A (basic cipher)
+  system_prompt: string;
+  bet_rules: string;
+  model: string;
+  // Bot B (HUNGRY System)
+  bot_b_system_prompt: string;
+  bot_b_bet_rules: string;
+  bot_b_model: string;
+  // Bot C (AJ Wordplay)
+  bot_c_system_prompt: string;
+  bot_c_bet_rules: string;
+  bot_c_model: string;
+  // Shared sizing / limits
+  max_units_per_bet: number;
+  max_daily_units: number;
+  unit_size: number;
+  min_confidence: number;
+  auto_bet_triple_locks: boolean;
+  auto_bet_double_locks: boolean;
+  auto_bet_single_locks: boolean;
+  starting_bankroll: number;
+}
+
+// ── Analysis Engine Output ──
+
+export type LockType =
+  | "triple_lock"
+  | "double_lock"
+  | "single_lock"
+  | "no_lock";
+
+export interface Alignment {
+  type: string;
+  cipherName: string;
+  cipherValue: number;
+  dateMethod: string;
+  dateValue: number;
+  weight?: number;
+}
+
+export interface TeamGematria {
+  teamName: string;
+  fullName: string;
+  city: string;
+  abbreviation: string;
+  cipherValues: Record<string, number>;
+  alignments: Alignment[];
+  alignmentCount: number;
+}
+
+export interface GameAnalysis {
+  gameId: string;
+  league: string;
+  date: Date;
+  homeTeam: TeamGematria;
+  awayTeam: TeamGematria;
+  lockType: LockType;
+  gematriaConfidence: number;
+  pickedSide: "home" | "away" | null;
+  alignmentCount: number;
+  homeAlignmentCount: number;
+  awayAlignmentCount: number;
+}
+
+// ── Gematria Types ──
+
+export interface GematriaResult {
+  ordinal: number;
+  reduction: number;
+  reverseOrdinal: number;
+  reverseReduction: number;
+}
+
+export interface DateNumerology {
+  fullDate: number;
+  reducedYear: number;
+  singleDigits: number;
+  shortYear: number;
+  monthDay: number;
+}
