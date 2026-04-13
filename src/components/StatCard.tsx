@@ -4,7 +4,7 @@ interface StatCardProps {
   label: string;
   value: string | number;
   prefix?: string;
-  color?: "default" | "success" | "danger";
+  color?: "default" | "success" | "danger" | "warning";
 }
 
 export default function StatCard({ label, value, prefix, color = "default" }: StatCardProps) {
@@ -13,7 +13,9 @@ export default function StatCard({ label, value, prefix, color = "default" }: St
       ? "text-success"
       : color === "danger"
         ? "text-danger"
-        : "text-text";
+        : color === "warning"
+          ? "text-warning"
+          : "text-text";
 
   return (
     <div className="card text-center">

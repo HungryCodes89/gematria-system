@@ -5,17 +5,22 @@ type TradeResult = "win" | "loss" | "push" | "void";
 
 /**
  * Extract the side ("over" | "under") and the numeric line from a pick string.
- * Handles formats like "Over 215.5", "Under 6.5", "over215.5", "OVER 215.5 points".
+ * Handles: "Over 215.5", "Under 6.5", "over215.5", "215.5 Over", "215.5 Under".
  */
 export function parseOverUnderLine(
   pick: string
 ): { side: "over" | "under"; line: number } | null {
-  const match = pick.match(/\b(over|under)\s*([\d]+(?:\.[\d]+)?)/i);
-  if (!match) return null;
-  return {
-    side: match[1]!.toLowerCase() as "over" | "under",
-    line: parseFloat(match[2]!),
-  };
+  // "Over 215.5" / "over215.5"
+  const fwd = pick.match(/\b(over|under)\s*([\d]+(?:\.[\d]+)?)/i);
+  if (fwd) {
+    return { side: fwd[1]!.toLowerCase() as "over" | "under", line: parseFloat(fwd[2]!) };
+  }
+  // "215.5 Over" / "215.5 Under"
+  const rev = pick.match(/([\d]+(?:\.[\d]+)?)\s+(over|under)\b/i);
+  if (rev) {
+    return { side: rev[2]!.toLowerCase() as "over" | "under", line: parseFloat(rev[1]!) };
+  }
+  return null;
 }
 
 /**
