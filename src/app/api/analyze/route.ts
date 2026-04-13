@@ -251,14 +251,18 @@ export async function POST(req: NextRequest) {
             await placeBots(supabase, game, decisions, analysis, "C", settings, botCState);
           }
 
+          const primaryAnalysis = analysisA ?? analysisB ?? analysisC;
+
           await supabase
             .from("games")
-            .update({ analyzed: true })
+            .update({
+              analyzed: true,
+              lock_type: primaryAnalysis?.lockType ?? "no_lock",
+              gematria_confidence: primaryAnalysis?.confidence ?? 0,
+            })
             .eq("id", game.id);
 
           analyzed++;
-
-          const primaryAnalysis = analysisA ?? analysisB ?? analysisC;
           controller.enqueue(
             sse({
               game: i + 1,

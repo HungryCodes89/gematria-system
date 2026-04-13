@@ -21,6 +21,8 @@ export interface Game {
   is_full_moon: boolean;
   is_primetime: boolean;
   analyzed: boolean;
+  lock_type: string | null;
+  gematria_confidence: number | null;
   created_at?: string;
   updated_at?: string;
 }

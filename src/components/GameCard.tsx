@@ -115,10 +115,10 @@ export default function GameCard({ game, trade, onReanalyze, reanalyzing }: Game
       {/* Lock badge + confidence */}
       {game.analyzed && (
         <div className="flex items-center justify-center gap-2 mb-2">
-          <LockBadge lockType={trade?.lock_type || null} />
-          {trade?.confidence != null && (
+          <LockBadge lockType={trade?.lock_type || game.lock_type || "no_lock"} />
+          {(trade?.confidence != null || game.gematria_confidence != null) && (
             <span className="text-[10px] text-muted">
-              {Math.round(trade.confidence)}%
+              {Math.round(trade?.confidence ?? game.gematria_confidence ?? 0)}%
             </span>
           )}
         </div>
