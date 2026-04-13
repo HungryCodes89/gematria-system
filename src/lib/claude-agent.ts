@@ -18,6 +18,21 @@ import { calculateDateNumerology } from "@/lib/gematria";
 import { getMoonIllumination, isFullMoon } from "@/lib/moon-phase";
 
 // ---------------------------------------------------------------------------
+// Pattern library types
+// ---------------------------------------------------------------------------
+
+export interface MatchedPattern {
+  pattern_type: string;
+  cipher_values: number[];
+  date_numerology: number[];
+  sport: string | null;
+  teams_involved: string | null;
+  outcome: "hit" | "miss";
+  notes: string | null;
+  confidence_score: number | null;
+}
+
+// ---------------------------------------------------------------------------
 // Return type
 // ---------------------------------------------------------------------------
 
@@ -153,7 +168,7 @@ function formatOdds(odds: ConsolidatedOdds | null): string {
   return parts.length ? parts.join("\n") : "No market odds available.";
 }
 
-function buildUserMessage(game: Game, analysis: GameAnalysis, bot?: "A" | "B" | "C", notes?: string): string {
+function buildUserMessage(game: Game, analysis: GameAnalysis, bot?: "A" | "B" | "C", notes?: string, matchedPatterns?: MatchedPattern[]): string {
   const dn = analysis.dateNumerology;
   const moonIll = getMoonIllumination(new Date(game.game_date + "T17:00:00Z"));
   const fullMoon = isFullMoon(game.game_date);
@@ -228,6 +243,20 @@ Favored Side: ${analysis.pickedSide === "skip" ? "Neither" : analysis.pickedSide
     } else {
       sections.push(`=== CONFIRMED JESUIT/MASONIC MARKERS ===\n  (none detected for this game)`);
     }
+  }
+
+  if (matchedPatterns && matchedPatterns.length > 0) {
+    const lines = matchedPatterns.map((p) => {
+      const parts: string[] = [
+        `  ▶ [${p.pattern_type}] — Historical Win Rate: ${p.outcome === "hit" ? "HIT" : "MISS"} (${p.confidence_score != null ? p.confidence_score + "% confidence" : "unscored"})`,
+      ];
+      if (p.teams_involved) parts.push(`    Teams: ${p.teams_involved}`);
+      if (p.cipher_values?.length) parts.push(`    Cipher Values: ${p.cipher_values.join(", ")}`);
+      if (p.date_numerology?.length) parts.push(`    Date Numbers: ${p.date_numerology.join(", ")}`);
+      if (p.notes) parts.push(`    Notes: ${p.notes}`);
+      return parts.join("\n");
+    });
+    sections.push(`=== VALIDATED PATTERN MATCHES ===\nThe following historically validated patterns match tonight's date numerology:\n${lines.join("\n\n")}`);
   }
 
   return sections.join("\n\n");
@@ -305,7 +334,8 @@ export async function analyzeGameWithClaude(
   game: Game,
   settings: GematriaSettings,
   bot?: "A" | "B" | "C",
-  notes?: string
+  notes?: string,
+  matchedPatterns?: MatchedPattern[]
 ): Promise<{ analysis: GameAnalysisResult; decisions: TradeDecision[] }> {
   const gameDate = new Date(game.game_date + "T00:00:00");
 
@@ -337,7 +367,7 @@ export async function analyzeGameWithClaude(
   };
 
   const systemMsg = buildSystemMessage(settings);
-  const userMsg = buildUserMessage(game, engineResult, bot, notes);
+  const userMsg = buildUserMessage(game, engineResult, bot, notes, matchedPatterns);
 
   const client = new Anthropic();
   const response = await client.messages.create({

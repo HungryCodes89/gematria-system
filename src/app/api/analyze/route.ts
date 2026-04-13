@@ -3,13 +3,14 @@ import { getSupabaseAdmin } from "@/lib/supabase-server";
 import { getTodayET } from "@/lib/date-utils";
 import { analyzeGameWithClaude } from "@/lib/claude-agent";
 import { canPlaceBet, calculateStake } from "@/lib/paper-trading";
+import { calculateDateNumerology, getAllDateValues } from "@/lib/gematria";
 import type {
   Game,
   GematriaSettings,
   TradeDecision,
   LockType,
 } from "@/lib/types";
-import type { GameAnalysisResult } from "@/lib/claude-agent";
+import type { GameAnalysisResult, MatchedPattern } from "@/lib/claude-agent";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -144,6 +145,22 @@ export async function POST(req: NextRequest) {
     .single();
   const todayNotes = notesRow?.content ?? "";
 
+  // Fetch validated patterns and match against tonight's date numerology
+  const [y, m, d] = today.split("-").map(Number);
+  const todayDateObj = new Date(y!, m! - 1, d!);
+  const todayNumerology = calculateDateNumerology(todayDateObj);
+  const todayValueSet = new Set(getAllDateValues(todayNumerology));
+
+  const { data: allPatterns } = await supabase
+    .from("validated_patterns")
+    .select("*")
+    .eq("outcome", "hit");
+
+  const matchedPatterns: MatchedPattern[] = (allPatterns ?? []).filter((p) => {
+    const dateNums: number[] = p.date_numerology ?? [];
+    return dateNums.some((n) => todayValueSet.has(n));
+  });
+
   const { data: ledgerRow } = await supabase
     .from("bankroll_ledger")
     .select("balance")
@@ -213,7 +230,7 @@ export async function POST(req: NextRequest) {
           // --- Bot A ---
           let analysisA: GameAnalysisResult | null = null;
           if (runA) {
-            const { analysis, decisions } = await analyzeGameWithClaude(game, settings, "A", todayNotes);
+            const { analysis, decisions } = await analyzeGameWithClaude(game, settings, "A", todayNotes, matchedPatterns);
             analysisA = analysis;
             await placeBots(supabase, game, decisions, analysis, "A", settings, botAState);
           }
@@ -221,7 +238,7 @@ export async function POST(req: NextRequest) {
           // --- Bot B ---
           let analysisB: GameAnalysisResult | null = null;
           if (runB) {
-            const { analysis, decisions } = await analyzeGameWithClaude(game, botBSettings, "B", todayNotes);
+            const { analysis, decisions } = await analyzeGameWithClaude(game, botBSettings, "B", todayNotes, matchedPatterns);
             analysisB = analysis;
             await placeBots(supabase, game, decisions, analysis, "B", settings, botBState);
           }
@@ -229,7 +246,7 @@ export async function POST(req: NextRequest) {
           // --- Bot C (AJ Wordplay) ---
           let analysisC: GameAnalysisResult | null = null;
           if (runC) {
-            const { analysis, decisions } = await analyzeGameWithClaude(game, botCSettings, "C", todayNotes);
+            const { analysis, decisions } = await analyzeGameWithClaude(game, botCSettings, "C", todayNotes, matchedPatterns);
             analysisC = analysis;
             await placeBots(supabase, game, decisions, analysis, "C", settings, botCState);
           }
