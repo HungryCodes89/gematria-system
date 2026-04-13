@@ -56,6 +56,15 @@ export default function TradeCard({ trade }: TradeCardProps) {
             <span className="text-[10px] font-bold px-1.5 py-0.5 rounded text-muted bg-surface">
               {game?.league || ""}
             </span>
+            <span
+              className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                trade.bot === "B"
+                  ? "bg-accent/20 text-accent"
+                  : "bg-surface text-muted"
+              }`}
+            >
+              {trade.bot === "B" ? "BOT B" : "BOT A"}
+            </span>
             <span className="text-xs text-muted">{dateStr}</span>
           </div>
           <div className="text-sm mb-1">
