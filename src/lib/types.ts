@@ -19,6 +19,7 @@ export interface Game {
   away_losses: number | null;
   polymarket_odds: ConsolidatedOdds | null;
   is_full_moon: boolean;
+  is_primetime: boolean;
   analyzed: boolean;
   created_at?: string;
   updated_at?: string;

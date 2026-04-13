@@ -153,12 +153,16 @@ function formatOdds(odds: ConsolidatedOdds | null): string {
   return parts.length ? parts.join("\n") : "No market odds available.";
 }
 
-function buildUserMessage(game: Game, analysis: GameAnalysis, bot?: "A" | "B" | "C"): string {
+function buildUserMessage(game: Game, analysis: GameAnalysis, bot?: "A" | "B" | "C", notes?: string): string {
   const dn = analysis.dateNumerology;
   const moonIll = getMoonIllumination(new Date(game.game_date + "T17:00:00Z"));
   const fullMoon = isFullMoon(game.game_date);
 
   const sections: string[] = [];
+
+  if (notes?.trim()) {
+    sections.push(`=== DECODE JOURNAL (Sean's Notes) ===\n${notes.trim()}`);
+  }
 
   sections.push(
     `=== GAME ===
@@ -300,7 +304,8 @@ function robustJsonParse(raw: string): TradeDecision[] {
 export async function analyzeGameWithClaude(
   game: Game,
   settings: GematriaSettings,
-  bot?: "A" | "B" | "C"
+  bot?: "A" | "B" | "C",
+  notes?: string
 ): Promise<{ analysis: GameAnalysisResult; decisions: TradeDecision[] }> {
   const gameDate = new Date(game.game_date + "T00:00:00");
 
@@ -332,7 +337,7 @@ export async function analyzeGameWithClaude(
   };
 
   const systemMsg = buildSystemMessage(settings);
-  const userMsg = buildUserMessage(game, engineResult, bot);
+  const userMsg = buildUserMessage(game, engineResult, bot, notes);
 
   const client = new Anthropic();
   const response = await client.messages.create({

@@ -1,11 +1,14 @@
 "use client";
 
+import { RefreshCw } from "lucide-react";
 import type { Game, PaperTrade } from "@/lib/types";
 import LockBadge from "./LockBadge";
 
 interface GameCardProps {
   game: Game;
   trade?: PaperTrade;
+  onReanalyze?: () => void;
+  reanalyzing?: boolean;
 }
 
 function formatTime(iso: string | null): string {
@@ -32,7 +35,7 @@ const LEAGUE_COLORS: Record<string, string> = {
   MLB: "bg-red-500/20 text-red-400",
 };
 
-export default function GameCard({ game, trade }: GameCardProps) {
+export default function GameCard({ game, trade, onReanalyze, reanalyzing }: GameCardProps) {
   const odds = game.polymarket_odds;
   const statusDisplay =
     game.status === "final"
@@ -56,14 +59,33 @@ export default function GameCard({ game, trade }: GameCardProps) {
     >
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
-        <span
-          className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${LEAGUE_COLORS[game.league] || ""}`}
-        >
-          {game.league}
-        </span>
-        <span className={`text-xs font-medium ${statusColor}`}>
-          {statusDisplay}
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span
+            className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${LEAGUE_COLORS[game.league] || ""}`}
+          >
+            {game.league}
+          </span>
+          {game.is_primetime && (
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-400">
+              PT
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {onReanalyze && (
+            <button
+              onClick={onReanalyze}
+              disabled={reanalyzing}
+              title="Re-analyze this game"
+              className="text-muted hover:text-accent transition-colors disabled:opacity-40"
+            >
+              <RefreshCw size={11} className={reanalyzing ? "animate-spin" : ""} />
+            </button>
+          )}
+          <span className={`text-xs font-medium ${statusColor}`}>
+            {statusDisplay}
+          </span>
+        </div>
       </div>
 
       {/* Teams */}

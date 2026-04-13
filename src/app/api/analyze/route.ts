@@ -86,11 +86,13 @@ export async function POST(req: NextRequest) {
   const supabase = getSupabaseAdmin();
   const today = getTodayET();
 
-  // Parse which bot(s) to run — defaults to "all"
+  // Parse request body — bot selector + optional single-game re-analyze
   let botParam: "all" | "A" | "B" | "C" = "all";
+  let gameIdParam: string | null = null;
   try {
     const body = await req.json();
     if (["all", "A", "B", "C"].includes(body?.bot)) botParam = body.bot;
+    if (body?.gameId && typeof body.gameId === "string") gameIdParam = body.gameId;
   } catch { /* no body — use default */ }
 
   const { data: settingsRow } = await supabase
@@ -122,13 +124,25 @@ export async function POST(req: NextRequest) {
   const runB = (botParam === "all" || botParam === "B") && Boolean(settings.bot_b_system_prompt);
   const runC = (botParam === "all" || botParam === "C") && Boolean(settings.bot_c_system_prompt);
 
-  const { data: games } = await supabase
-    .from("games")
-    .select("*")
-    .eq("game_date", today)
-    .eq("analyzed", false);
+  // Single-game re-analyze: mark unanalyzed first, then fetch just that game
+  if (gameIdParam) {
+    await supabase.from("games").update({ analyzed: false }).eq("id", gameIdParam);
+  }
 
+  const gamesQuery = gameIdParam
+    ? supabase.from("games").select("*").eq("id", gameIdParam)
+    : supabase.from("games").select("*").eq("game_date", today).eq("analyzed", false);
+
+  const { data: games } = await gamesQuery;
   const unanalyzed: Game[] = (games ?? []) as Game[];
+
+  // Fetch today's decode notes once and inject into all bot prompts
+  const { data: notesRow } = await supabase
+    .from("decode_notes")
+    .select("content")
+    .eq("game_date", today)
+    .single();
+  const todayNotes = notesRow?.content ?? "";
 
   const { data: ledgerRow } = await supabase
     .from("bankroll_ledger")
@@ -199,7 +213,7 @@ export async function POST(req: NextRequest) {
           // --- Bot A ---
           let analysisA: GameAnalysisResult | null = null;
           if (runA) {
-            const { analysis, decisions } = await analyzeGameWithClaude(game, settings, "A");
+            const { analysis, decisions } = await analyzeGameWithClaude(game, settings, "A", todayNotes);
             analysisA = analysis;
             await placeBots(supabase, game, decisions, analysis, "A", settings, botAState);
           }
@@ -207,7 +221,7 @@ export async function POST(req: NextRequest) {
           // --- Bot B ---
           let analysisB: GameAnalysisResult | null = null;
           if (runB) {
-            const { analysis, decisions } = await analyzeGameWithClaude(game, botBSettings, "B");
+            const { analysis, decisions } = await analyzeGameWithClaude(game, botBSettings, "B", todayNotes);
             analysisB = analysis;
             await placeBots(supabase, game, decisions, analysis, "B", settings, botBState);
           }
@@ -215,7 +229,7 @@ export async function POST(req: NextRequest) {
           // --- Bot C (AJ Wordplay) ---
           let analysisC: GameAnalysisResult | null = null;
           if (runC) {
-            const { analysis, decisions } = await analyzeGameWithClaude(game, botCSettings, "C");
+            const { analysis, decisions } = await analyzeGameWithClaude(game, botCSettings, "C", todayNotes);
             analysisC = analysis;
             await placeBots(supabase, game, decisions, analysis, "C", settings, botCState);
           }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import {
   Download,
@@ -8,6 +8,8 @@ import {
   CheckCircle,
   Moon,
   Filter,
+  PenLine,
+  BookOpen,
 } from "lucide-react";
 import { calculateDateNumerology } from "@/lib/gematria";
 import { getTodayET } from "@/lib/date-utils";
@@ -17,6 +19,7 @@ import type { Game, PaperTrade, DateNumerology } from "@/lib/types";
 import Nav from "@/components/Nav";
 import GameCard from "@/components/GameCard";
 import StatCard from "@/components/StatCard";
+import ManualPickModal from "@/components/ManualPickModal";
 
 type League = "ALL" | "NBA" | "NHL" | "MLB";
 type BotSelection = "all" | "A" | "B" | "C";
@@ -40,6 +43,11 @@ export default function Dashboard() {
     total: number;
     label: string;
   } | null>(null);
+  const [showManualModal, setShowManualModal] = useState(false);
+  const [reanalyzingId, setReanalyzingId] = useState<string | null>(null);
+  const [notes, setNotes] = useState("");
+  const [notesSaving, setNotesSaving] = useState(false);
+  const notesSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const today = getTodayET();
   const todayDate = (() => {
@@ -68,9 +76,7 @@ export default function Dashboard() {
     } catch { /* ignore */ }
 
     try {
-      const res = await fetch(
-        `/api/fetch-games?date=${today}&readonly=1`
-      );
+      const res = await fetch(`/api/fetch-games?date=${today}&readonly=1`);
       if (res.ok) {
         const data = await res.json();
         if (data.games) setGames(data.games);
@@ -78,9 +84,66 @@ export default function Dashboard() {
     } catch { /* ignore */ }
   }, [today]);
 
+  const loadNotes = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/notes?date=${today}`);
+      if (res.ok) {
+        const data = await res.json();
+        setNotes(data.content ?? "");
+      }
+    } catch { /* ignore */ }
+  }, [today]);
+
   useEffect(() => {
     loadGames();
-  }, [loadGames]);
+    loadNotes();
+  }, [loadGames, loadNotes]);
+
+  function handleNotesChange(value: string) {
+    setNotes(value);
+    if (notesSaveTimer.current) clearTimeout(notesSaveTimer.current);
+    notesSaveTimer.current = setTimeout(async () => {
+      setNotesSaving(true);
+      try {
+        await fetch("/api/notes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ date: today, content: value }),
+        });
+      } finally {
+        setNotesSaving(false);
+      }
+    }, 1200);
+  }
+
+  async function handleReanalyze(gameId: string) {
+    setReanalyzingId(gameId);
+    try {
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bot: selectedBot, gameId }),
+      });
+      if (res.body) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split("\n");
+          buf = lines.pop() || "";
+        }
+      }
+      toast.success("Re-analysis complete");
+      loadGames();
+    } catch (e) {
+      toast.error("Re-analyze failed: " + String(e));
+    } finally {
+      setReanalyzingId(null);
+    }
+  }
 
   const filtered = league === "ALL" ? games : games.filter((g) => g.league === league);
   const leagueCounts = {
@@ -250,7 +313,7 @@ export default function Dashboard() {
         </div>
 
         {/* Action buttons */}
-        <div className="grid grid-cols-3 gap-3 mb-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
           <button
             onClick={handleFetch}
             disabled={loading !== null}
@@ -269,7 +332,7 @@ export default function Dashboard() {
             <Sparkles size={16} className={loading === "analyze" ? "animate-pulse" : ""} />
             <span className="text-sm font-medium">
               {analyzeProgress
-                ? `Analyzing ${analyzeProgress.current}/${analyzeProgress.total}...`
+                ? `${analyzeProgress.current}/${analyzeProgress.total}...`
                 : loading === "analyze"
                   ? "Starting..."
                   : "Analyze & Bet"}
@@ -284,6 +347,14 @@ export default function Dashboard() {
             <span className="text-sm font-medium">
               {loading === "settle" ? "Settling..." : "Settle Bets"}
             </span>
+          </button>
+          <button
+            onClick={() => setShowManualModal(true)}
+            disabled={games.length === 0}
+            className="card flex items-center justify-center gap-2 py-3 border-warning/30 hover:bg-warning/10 transition-colors disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+          >
+            <PenLine size={16} />
+            <span className="text-sm font-medium">Log Pick</span>
           </button>
         </div>
 
@@ -342,11 +413,47 @@ export default function Dashboard() {
                 key={game.id}
                 game={game}
                 trade={tradeMap.get(game.id)}
+                onReanalyze={() => handleReanalyze(game.id)}
+                reanalyzing={reanalyzingId === game.id}
               />
             ))}
           </div>
         )}
+
+        {/* Decode Journal */}
+        <div className="mt-8">
+          <div className="flex items-center gap-2 mb-2">
+            <BookOpen size={14} className="text-muted" />
+            <span className="text-xs font-medium uppercase tracking-wider text-muted">
+              Decode Journal
+            </span>
+            {notesSaving && (
+              <span className="text-[10px] text-muted animate-pulse">saving…</span>
+            )}
+          </div>
+          <textarea
+            value={notes}
+            onChange={(e) => handleNotesChange(e.target.value)}
+            rows={5}
+            placeholder={`Notes for ${today} — alignments you spotted, narratives in play, numbers to watch…`}
+            className="w-full bg-surface border border-border rounded-lg px-3 py-2.5 text-sm text-text placeholder:text-muted resize-y focus:outline-none focus:border-accent/50 transition-colors"
+          />
+          <p className="text-[10px] text-muted mt-1">
+            Auto-saved · Injected into all bot prompts when Analyze &amp; Bet runs
+          </p>
+        </div>
       </main>
+
+      {showManualModal && (
+        <ManualPickModal
+          games={games}
+          onClose={() => setShowManualModal(false)}
+          onSaved={() => {
+            loadGames();
+            toast.success("Pick logged");
+          }}
+        />
+      )}
     </div>
   );
 }

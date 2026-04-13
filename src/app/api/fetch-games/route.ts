@@ -9,6 +9,18 @@ import { getSupabaseAdmin } from '@/lib/supabase-server'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
+/** Returns true if the game starts at 7 PM ET or later. */
+function isPrimetimeET(isoString: string | null): boolean {
+  if (!isoString) return false
+  const date = new Date(isoString)
+  if (isNaN(date.getTime())) return false
+  const etHour = parseInt(
+    new Intl.DateTimeFormat('en-US', { hour: '2-digit', hour12: false, timeZone: 'America/New_York' }).format(date),
+    10
+  )
+  return etHour >= 19
+}
+
 function mapEspnStatus(state: string): 'pre' | 'in_progress' | 'final' {
   if (state === 'pre') return 'pre'
   if (state === 'in') return 'in_progress'
@@ -34,6 +46,7 @@ function espnGameToRow(g: ESPNGame, league: 'NBA' | 'MLB', today: string, fullMo
     home_losses: g.homeTeam.losses || 0,
     away_losses: g.awayTeam.losses || 0,
     is_full_moon: fullMoon,
+    is_primetime: isPrimetimeET(g.startTime),
   }
 }
 
@@ -61,6 +74,7 @@ function nhlGameToRow(g: NHLGame, today: string, fullMoon: boolean) {
     home_losses: g.homeTeam.losses || 0,
     away_losses: g.awayTeam.losses || 0,
     is_full_moon: fullMoon,
+    is_primetime: isPrimetimeET(g.startTime),
   }
 }
 
