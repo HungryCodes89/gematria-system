@@ -199,7 +199,7 @@ export async function POST(req: NextRequest) {
           // --- Bot A ---
           let analysisA: GameAnalysisResult | null = null;
           if (runA) {
-            const { analysis, decisions } = await analyzeGameWithClaude(game, settings);
+            const { analysis, decisions } = await analyzeGameWithClaude(game, settings, "A");
             analysisA = analysis;
             await placeBots(supabase, game, decisions, analysis, "A", settings, botAState);
           }
@@ -207,7 +207,7 @@ export async function POST(req: NextRequest) {
           // --- Bot B ---
           let analysisB: GameAnalysisResult | null = null;
           if (runB) {
-            const { analysis, decisions } = await analyzeGameWithClaude(game, botBSettings);
+            const { analysis, decisions } = await analyzeGameWithClaude(game, botBSettings, "B");
             analysisB = analysis;
             await placeBots(supabase, game, decisions, analysis, "B", settings, botBState);
           }
@@ -215,7 +215,7 @@ export async function POST(req: NextRequest) {
           // --- Bot C (AJ Wordplay) ---
           let analysisC: GameAnalysisResult | null = null;
           if (runC) {
-            const { analysis, decisions } = await analyzeGameWithClaude(game, botCSettings);
+            const { analysis, decisions } = await analyzeGameWithClaude(game, botCSettings, "C");
             analysisC = analysis;
             await placeBots(supabase, game, decisions, analysis, "C", settings, botCState);
           }

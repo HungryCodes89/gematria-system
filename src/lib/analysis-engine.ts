@@ -310,6 +310,8 @@ function findAlignmentsForTeam(
       { method: 'Short', value: dateNums.shortYear },
       { method: 'M+D', value: dateNums.monthDay },
       { method: 'Single Digits', value: dateNums.singleDigits },
+      { method: 'Day of Year', value: dateNums.dayOfYear },
+      { method: 'Days Remaining', value: dateNums.daysRemaining },
     ]
     for (const dk of dateKeys) {
       if (code === dk.value && code > 0) {
@@ -336,6 +338,8 @@ function findAlignmentsForTeam(
       { method: 'M+D', value: dateNums.monthDay },
       { method: 'Single Digits', value: dateNums.singleDigits },
       { method: 'Root Number', value: dateNums.rootNumber },
+      { method: 'Day of Year', value: dateNums.dayOfYear },
+      { method: 'Days Remaining', value: dateNums.daysRemaining },
     ]
     for (const dk of dateKeys) {
       if (jersey === dk.value && jersey > 0) {

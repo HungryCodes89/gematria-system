@@ -36,6 +36,57 @@ const LOCK_MAP: Record<EngineLockType, TypesLockType> = {
 };
 
 // ---------------------------------------------------------------------------
+// Jesuit / Masonic number detection (Bot C only)
+// ---------------------------------------------------------------------------
+
+const JESUIT_NUMBERS = new Set([33, 42, 47, 56, 59, 72, 84, 113, 131, 144, 187, 201, 322]);
+
+interface JesuitHit {
+  element: string;
+  cipher: string;
+  value: number;
+  side: "home" | "away";
+}
+
+function collectJesuitFlags(engineResult: GameAnalysis): JesuitHit[] {
+  const hits: JesuitHit[] = [];
+  const seen = new Set<string>();
+
+  const checkG = (g: { text: string; ordinal: number; reduction: number; reverseOrdinal: number; reverseReduction: number }, side: "home" | "away") => {
+    if (!g.text) return;
+    const ciphers: [string, number][] = [
+      ["Ordinal", g.ordinal],
+      ["Reduction", g.reduction],
+      ["Reverse Ordinal", g.reverseOrdinal],
+      ["Reverse Reduction", g.reverseReduction],
+    ];
+    for (const [cipher, val] of ciphers) {
+      const key = `${side}-${g.text}-${cipher}`;
+      if (JESUIT_NUMBERS.has(val) && !seen.has(key)) {
+        seen.add(key);
+        hits.push({ element: g.text, cipher, value: val, side });
+      }
+    }
+  };
+
+  const checkTeam = (tg: TeamGematria, side: "home" | "away") => {
+    checkG(tg.city, side);
+    checkG(tg.teamName, side);
+    checkG(tg.fullName, side);
+    checkG(tg.abbreviation, side);
+    for (const alt of tg.alternates) checkG(alt, side);
+    for (const sp of tg.starPlayers) checkG(sp, side);
+    if (tg.goalie) checkG(tg.goalie, side);
+    if (tg.coach) checkG(tg.coach, side);
+  };
+
+  checkTeam(engineResult.homeGematria, "home");
+  checkTeam(engineResult.awayGematria, "away");
+
+  return hits;
+}
+
+// ---------------------------------------------------------------------------
 // Prompt helpers
 // ---------------------------------------------------------------------------
 
@@ -102,7 +153,7 @@ function formatOdds(odds: ConsolidatedOdds | null): string {
   return parts.length ? parts.join("\n") : "No market odds available.";
 }
 
-function buildUserMessage(game: Game, analysis: GameAnalysis): string {
+function buildUserMessage(game: Game, analysis: GameAnalysis, bot?: "A" | "B" | "C"): string {
   const dn = analysis.dateNumerology;
   const moonIll = getMoonIllumination(new Date(game.game_date + "T17:00:00Z"));
   const fullMoon = isFullMoon(game.game_date);
@@ -122,7 +173,7 @@ Moon: ${(moonIll * 100).toFixed(0)}% illumination${fullMoon ? " (FULL MOON)" : "
     `=== DATE NUMEROLOGY ===
 Full: ${dn.full} | Reduced Year: ${dn.reducedYear} | Single Digits: ${dn.singleDigits}
 Short Year: ${dn.shortYear} | Month+Day: ${dn.monthDay}
-Root Number: ${dn.rootNumber} | Calendar Day: ${dn.calendarDay} | Calendar Month: ${dn.calendarMonth}`
+Root Number: ${dn.rootNumber} | Calendar Day: ${dn.calendarDay} | Calendar Month: ${dn.calendarMonth}${bot === "C" ? `\nDay of Year: ${dn.dayOfYear} | Days Remaining: ${dn.daysRemaining}` : ""}`
   );
 
   sections.push(
@@ -162,6 +213,18 @@ Favored Side: ${analysis.pickedSide === "skip" ? "Neither" : analysis.pickedSide
   );
 
   sections.push(`=== ODDS ===\n${formatOdds(game.polymarket_odds)}`);
+
+  if (bot === "C") {
+    const jesuitHits = collectJesuitFlags(analysis);
+    if (jesuitHits.length > 0) {
+      const lines = jesuitHits.map(
+        (h) => `  ✦ ${h.side.toUpperCase()} "${h.element}" ${h.cipher} = ${h.value}`
+      );
+      sections.push(`=== CONFIRMED JESUIT/MASONIC MARKERS ===\n${lines.join("\n")}`);
+    } else {
+      sections.push(`=== CONFIRMED JESUIT/MASONIC MARKERS ===\n  (none detected for this game)`);
+    }
+  }
 
   return sections.join("\n\n");
 }
@@ -236,7 +299,8 @@ function robustJsonParse(raw: string): TradeDecision[] {
 
 export async function analyzeGameWithClaude(
   game: Game,
-  settings: GematriaSettings
+  settings: GematriaSettings,
+  bot?: "A" | "B" | "C"
 ): Promise<{ analysis: GameAnalysisResult; decisions: TradeDecision[] }> {
   const gameDate = new Date(game.game_date + "T00:00:00");
 
@@ -268,7 +332,7 @@ export async function analyzeGameWithClaude(
   };
 
   const systemMsg = buildSystemMessage(settings);
-  const userMsg = buildUserMessage(game, engineResult);
+  const userMsg = buildUserMessage(game, engineResult, bot);
 
   const client = new Anthropic();
   const response = await client.messages.create({

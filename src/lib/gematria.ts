@@ -41,6 +41,8 @@ export interface DateNumerology {
   rootNumber: number     // singleDigits reduced to one digit (e.g. 23→5)
   calendarDay: number    // 1–31; matches e.g. "Under" reduction to that day
   calendarMonth: number  // 1–12
+  dayOfYear: number      // 1–366; AJ method — nth day of the year
+  daysRemaining: number  // days left in the year (365/366 - dayOfYear)
 }
 
 function sumLetters(text: string, table: Record<string, number>): number {
@@ -66,6 +68,15 @@ function reduceToSingleDigit(n: number): number {
   return n
 }
 
+function isLeapYear(year: number): boolean {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0
+}
+
+function getDayOfYear(date: Date): number {
+  const start = new Date(date.getFullYear(), 0, 1)
+  return Math.floor((date.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1
+}
+
 export function calculateDateNumerology(date: Date): DateNumerology {
   const month = date.getMonth() + 1
   const day = date.getDate()
@@ -83,10 +94,12 @@ export function calculateDateNumerology(date: Date): DateNumerology {
   const rootNumber = reduceToSingleDigit(singleDigits)
   const calendarDay = day
   const calendarMonth = month
+  const dayOfYear = getDayOfYear(date)
+  const daysRemaining = (isLeapYear(year) ? 366 : 365) - dayOfYear
 
   const dateStr = `${month}/${day}/${year}`
 
-  return { date: dateStr, full, reducedYear, singleDigits, shortYear, monthDay, rootNumber, calendarDay, calendarMonth }
+  return { date: dateStr, full, reducedYear, singleDigits, shortYear, monthDay, rootNumber, calendarDay, calendarMonth, dayOfYear, daysRemaining }
 }
 
 export function getAllGematriaValues(result: GematriaResult): number[] {
@@ -103,6 +116,8 @@ export function getAllDateValues(numerology: DateNumerology): number[] {
     numerology.rootNumber,
     numerology.calendarDay,
     numerology.calendarMonth,
+    numerology.dayOfYear,
+    numerology.daysRemaining,
   ]
 }
 
@@ -127,6 +142,8 @@ export function findMatchingValues(
     ['Month+Day', dateNums.monthDay],
     ['Root', dateNums.rootNumber],
     ['Calendar Day', dateNums.calendarDay],
+    ['Day of Year', dateNums.dayOfYear],
+    ['Days Remaining', dateNums.daysRemaining],
     // Calendar Month omitted from auto-match (small integers = noisy); use calculator if needed.
   ]
 
