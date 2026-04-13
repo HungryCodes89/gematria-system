@@ -257,7 +257,14 @@ export async function POST(req: NextRequest) {
       }
 
       const totalBets = botAState.betsPlaced + botBState.betsPlaced + botCState.betsPlaced;
-      const lowestBalance = Math.min(botAState.balance, botBState.balance, botCState.balance);
+      // Only include balances from bots that actually ran — disabled bots retain the
+      // full starting balance and would otherwise corrupt the Math.min result.
+      const activeBalances = [
+        runA ? botAState.balance : null,
+        runB ? botBState.balance : null,
+        runC ? botCState.balance : null,
+      ].filter((b): b is number => b !== null);
+      const lowestBalance = activeBalances.length > 0 ? Math.min(...activeBalances) : balance;
 
       await supabase.from("bankroll_ledger").upsert(
         {

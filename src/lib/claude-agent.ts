@@ -253,9 +253,15 @@ export async function analyzeGameWithClaude(
     awayLosses: game.away_losses,
   });
 
+  // Full moon boosts confidence: +8 points (capped at 93)
+  const fullMoon = isFullMoon(game.game_date);
+  const boostedConfidence = fullMoon && engineResult.lockType !== "skip"
+    ? Math.min(93, engineResult.gematriaConfidence + 8)
+    : engineResult.gematriaConfidence;
+
   const analysisResult: GameAnalysisResult = {
     lockType: LOCK_MAP[engineResult.lockType],
-    confidence: engineResult.gematriaConfidence,
+    confidence: boostedConfidence,
     pickedSide: engineResult.pickedSide === "skip" ? null : engineResult.pickedSide,
     alignmentCount:
       engineResult.homeAlignments.length + engineResult.awayAlignments.length,

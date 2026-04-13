@@ -544,7 +544,13 @@ export function analyzeGame(params: {
   const awayInfo = findTeam(awayTeamName, league)
 
   const homeGematria = homeInfo
-    ? computeTeamGematria(homeInfo, homeStarPlayers, homeGoalie, homeCoach, homeJerseyNumbers)
+    ? computeTeamGematria(
+        homeInfo,
+        [...(homeInfo.starPlayers ?? []), ...homeStarPlayers],
+        homeGoalie,
+        homeCoach ?? homeInfo.coach,
+        homeJerseyNumbers,
+      )
     : {
         city: calculateGematria(homeTeamName),
         teamName: calculateGematria(homeTeamName),
@@ -559,7 +565,13 @@ export function analyzeGame(params: {
       }
 
   const awayGematria = awayInfo
-    ? computeTeamGematria(awayInfo, awayStarPlayers, awayGoalie, awayCoach, awayJerseyNumbers)
+    ? computeTeamGematria(
+        awayInfo,
+        [...(awayInfo.starPlayers ?? []), ...awayStarPlayers],
+        awayGoalie,
+        awayCoach ?? awayInfo.coach,
+        awayJerseyNumbers,
+      )
     : {
         city: calculateGematria(awayTeamName),
         teamName: calculateGematria(awayTeamName),
