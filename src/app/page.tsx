@@ -20,6 +20,7 @@ import Nav from "@/components/Nav";
 import GameCard from "@/components/GameCard";
 import StatCard from "@/components/StatCard";
 import ManualPickModal from "@/components/ManualPickModal";
+import GameDetailModal from "@/components/GameDetailModal";
 
 type League = "ALL" | "NBA" | "NHL" | "MLB";
 type BotSelection = "all" | "A" | "B" | "C";
@@ -44,6 +45,7 @@ export default function Dashboard() {
     label: string;
   } | null>(null);
   const [showManualModal, setShowManualModal] = useState(false);
+  const [selectedGame, setSelectedGame] = useState<Game | null>(null);
   const [reanalyzingId, setReanalyzingId] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
   const [notesSaving, setNotesSaving] = useState(false);
@@ -446,6 +448,7 @@ export default function Dashboard() {
                 trade={tradeMap.get(game.id)}
                 onReanalyze={() => handleReanalyze(game.id)}
                 reanalyzing={reanalyzingId === game.id}
+                onClick={() => setSelectedGame(game)}
               />
             ))}
           </div>
@@ -483,6 +486,13 @@ export default function Dashboard() {
             loadGames();
             toast.success("Pick logged");
           }}
+        />
+      )}
+
+      {selectedGame && (
+        <GameDetailModal
+          game={selectedGame}
+          onClose={() => setSelectedGame(null)}
         />
       )}
     </div>

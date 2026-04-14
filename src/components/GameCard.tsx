@@ -9,6 +9,7 @@ interface GameCardProps {
   trade?: PaperTrade;
   onReanalyze?: () => void;
   reanalyzing?: boolean;
+  onClick?: () => void;
 }
 
 function formatTime(iso: string | null): string {
@@ -35,7 +36,7 @@ const LEAGUE_COLORS: Record<string, string> = {
   MLB: "bg-red-500/20 text-red-400",
 };
 
-export default function GameCard({ game, trade, onReanalyze, reanalyzing }: GameCardProps) {
+export default function GameCard({ game, trade, onReanalyze, reanalyzing, onClick }: GameCardProps) {
   const odds = game.polymarket_odds;
   const statusDisplay =
     game.status === "final"
@@ -53,9 +54,10 @@ export default function GameCard({ game, trade, onReanalyze, reanalyzing }: Game
 
   return (
     <div
+      onClick={onClick}
       className={`card hover:border-border-accent transition-colors ${
         trade ? "border-l-2 border-l-success" : ""
-      }`}
+      } ${onClick ? "cursor-pointer" : ""}`}
     >
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
