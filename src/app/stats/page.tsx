@@ -41,6 +41,60 @@ function formatClv(clv: number | null): string {
   return clv >= 0 ? `+${clv.toFixed(2)}` : clv.toFixed(2);
 }
 
+const BOT_BADGE: Record<string, string> = {
+  "Bot A": "bg-blue-500/20 text-blue-400",
+  "Bot B": "bg-cyan-500/20 text-cyan-400",
+  "Bot C": "bg-purple-500/20 text-purple-400",
+};
+
+const MEDALS = ["🥇", "🥈", "🥉"];
+
+function ClvLeaderboard({ byBot }: { byBot: Record<string, GroupStats> }) {
+  const ranked = Object.entries(byBot)
+    .filter(([, s]) => s.avgClv != null)
+    .sort((a, b) => (b[1].avgClv ?? -Infinity) - (a[1].avgClv ?? -Infinity));
+
+  if (ranked.length === 0) return null;
+
+  return (
+    <div className="card">
+      <div className="text-[10px] uppercase tracking-wider text-muted mb-3">
+        CLV Leaderboard — Bot Rankings
+      </div>
+      <div className="space-y-2">
+        {ranked.map(([name, s], i) => (
+          <div
+            key={name}
+            className={`flex items-center gap-3 p-2 rounded-lg ${i === 0 ? "bg-success/5 border border-success/10" : "bg-surface/50"}`}
+          >
+            <span className="text-base w-5 shrink-0">{MEDALS[i] ?? `#${i + 1}`}</span>
+            <span
+              className={`text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 ${BOT_BADGE[name] ?? "bg-surface text-muted"}`}
+            >
+              {name}
+            </span>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span
+                  className={`font-[family-name:var(--font-mono)] text-sm font-bold ${
+                    (s.avgClv ?? 0) >= 0 ? "text-success" : "text-danger"
+                  }`}
+                >
+                  {formatClv(s.avgClv)} avg CLV
+                </span>
+                <span className="text-[10px] text-muted">
+                  {s.wins}-{s.losses} · {s.winRate}% win · {s.roi >= 0 ? "+" : ""}{s.roi}% ROI
+                </span>
+              </div>
+            </div>
+            <span className="text-[10px] text-muted shrink-0">{s.total} bets</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function BreakdownTable({
   title,
   data,
@@ -211,10 +265,12 @@ export default function StatsPage() {
             Positive CLV = you beat the closing line (sharp money agrees with you). Negative = line moved against your pick after placement.
           </p>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
           <BreakdownTable title="CLV by Bot" data={data?.byBot ?? {}} showClv />
           <BreakdownTable title="CLV by Primetime" data={data?.byPrimetime ?? {}} showClv />
         </div>
+
+        <ClvLeaderboard byBot={data?.byBot ?? {}} />
       </main>
     </div>
   );

@@ -10,7 +10,9 @@ import {
   Filter,
   PenLine,
   BookOpen,
+  Trophy,
 } from "lucide-react";
+import LockBadge from "@/components/LockBadge";
 import { calculateDateNumerology } from "@/lib/gematria";
 import { getTodayET } from "@/lib/date-utils";
 import { isFullMoon, getFullMoonName } from "@/lib/moon-phase";
@@ -417,6 +419,63 @@ export default function Dashboard() {
             </button>
           ))}
         </div>
+
+        {/* Best Pick of the Day */}
+        {(() => {
+          const BOT_BADGE: Record<string, string> = {
+            A: "bg-blue-500/20 text-blue-400",
+            B: "bg-cyan-500/20 text-cyan-400",
+            C: "bg-purple-500/20 text-purple-400",
+          };
+          const best = trades.length > 0
+            ? trades.reduce((b, t) => (t.confidence ?? 0) > (b.confidence ?? 0) ? t : b)
+            : null;
+          if (!best) return null;
+          const game = best.game;
+          return (
+            <div className="card border-accent/20 bg-accent/5 mb-6">
+              <div className="flex items-center gap-2 mb-2">
+                <Trophy size={13} className="text-accent" />
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-accent">
+                  Best Pick of the Day
+                </span>
+              </div>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${BOT_BADGE[best.bot] ?? ""}`}>
+                      BOT {best.bot}
+                    </span>
+                    <LockBadge lockType={best.lock_type} />
+                    {game && (
+                      <span className="text-[10px] text-muted">{game.league}</span>
+                    )}
+                  </div>
+                  <div className="text-sm font-semibold text-text">{best.pick}</div>
+                  {game && (
+                    <div className="text-[10px] text-muted mt-0.5">
+                      {game.away_team} at {game.home_team}
+                    </div>
+                  )}
+                  {best.reasoning && (
+                    <div className="text-[10px] text-muted mt-1.5 leading-relaxed line-clamp-2">
+                      {best.reasoning}
+                    </div>
+                  )}
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="font-[family-name:var(--font-mono)] text-xs text-muted">
+                    {best.odds != null ? (best.odds > 0 ? `+${best.odds}` : String(best.odds)) : "—"}
+                  </div>
+                  <div className="text-lg font-bold font-[family-name:var(--font-mono)] text-accent">
+                    {Math.round(best.confidence ?? 0)}%
+                  </div>
+                  <div className="text-[9px] text-muted">confidence</div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Game grid */}
         {filtered.length === 0 ? (

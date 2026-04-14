@@ -38,6 +38,7 @@ export async function POST(req: NextRequest) {
     profit_loss: 0,
     reasoning: reasoning || null,
     lock_type: "manual",
+    strategy_version: "v1",
     placed_at: new Date().toISOString(),
   });
 

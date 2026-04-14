@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { Plus, TrendingUp, CheckCircle, XCircle } from "lucide-react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { Plus, TrendingUp, CheckCircle, XCircle, Zap } from "lucide-react";
 import Nav from "@/components/Nav";
+import { calculateDateNumerology, getAllDateValues } from "@/lib/gematria";
+import { getTodayET } from "@/lib/date-utils";
 
 const PATTERN_TYPES = [
   "Return Stamp",
@@ -136,6 +138,20 @@ export default function PatternsPage() {
   const totalPatterns = patterns.length;
   const totalHits = patterns.filter((p) => p.outcome === "hit").length;
   const overallWinRate = totalPatterns > 0 ? Math.round((totalHits / totalPatterns) * 100) : 0;
+
+  const todayMatches = useMemo(() => {
+    const today = getTodayET();
+    const [y, m, d] = today.split("-").map(Number);
+    const dateObj = new Date(y!, m! - 1, d!);
+    const numerology = calculateDateNumerology(dateObj);
+    const todayValues = new Set(getAllDateValues(numerology));
+    return patterns.filter(
+      (p) =>
+        p.outcome === "hit" &&
+        Array.isArray(p.date_numerology) &&
+        p.date_numerology.some((n) => todayValues.has(n))
+    );
+  }, [patterns]);
 
   return (
     <div className="min-h-screen">
@@ -307,6 +323,55 @@ export default function PatternsPage() {
                 </button>
               </div>
             </form>
+          </div>
+        )}
+
+        {/* Pattern of the Day */}
+        {!loading && todayMatches.length > 0 && (
+          <div className="card border-accent/20 bg-accent/5 mb-6">
+            <div className="flex items-center gap-2 mb-3">
+              <Zap size={13} className="text-accent" />
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-accent">
+                Pattern of the Day — {todayMatches.length} match{todayMatches.length > 1 ? "es" : ""} today
+              </span>
+            </div>
+            <div className="space-y-2">
+              {todayMatches.map((p) => (
+                <div
+                  key={p.id}
+                  className="bg-surface/60 border border-border rounded-lg p-2.5"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
+                        <span className="text-[10px] font-bold text-text">{p.pattern_type}</span>
+                        {p.sport && (
+                          <span className="text-[9px] text-muted bg-border/60 px-1 rounded">
+                            {p.sport}
+                          </span>
+                        )}
+                      </div>
+                      {p.teams_involved && (
+                        <div className="text-[10px] text-muted truncate">{p.teams_involved}</div>
+                      )}
+                      {p.notes && (
+                        <div className="text-[10px] text-muted mt-0.5 line-clamp-2">{p.notes}</div>
+                      )}
+                    </div>
+                    <div className="text-right shrink-0">
+                      {p.confidence_score != null && (
+                        <div className="text-sm font-bold font-[family-name:var(--font-mono)] text-accent">
+                          {p.confidence_score}%
+                        </div>
+                      )}
+                      <div className="text-[9px] text-muted font-[family-name:var(--font-mono)]">
+                        {p.date_numerology?.join(", ")}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

@@ -103,6 +103,7 @@ export interface PaperTrade {
   opening_line: number | null;
   closing_line: number | null;
   clv_percent: number | null;
+  strategy_version: string;
   placed_at: string;
   settled_at: string | null;
   game?: Game;

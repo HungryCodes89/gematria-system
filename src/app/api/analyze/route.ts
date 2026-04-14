@@ -129,6 +129,7 @@ async function placeBots(
         lock_type: analysis.lockType,
         reasoning: decision.reasoning,
         opening_line: extractOpeningLine(game, decision.betType, decision.pickedSide),
+        strategy_version: "v1",
         placed_at: new Date().toISOString(),
       })
       .select("id")
