@@ -26,6 +26,18 @@ function sse(data: unknown): string {
   return `data: ${JSON.stringify(data)}\n\n`;
 }
 
+interface DecisionLog {
+  idx: number;
+  action: string;
+  betType: string;
+  pick: string;
+  claudeConfidence: number;
+  engineLockType: string;
+  placed: boolean;
+  skipReason?: string;
+  dbError?: string;
+}
+
 async function placeBots(
   supabase: ReturnType<typeof getSupabaseAdmin>,
   game: Game,
@@ -34,15 +46,43 @@ async function placeBots(
   bot: "A" | "B" | "C",
   settings: GematriaSettings,
   state: { balance: number; dailyUnits: number; betsPlaced: number }
-) {
-  for (const decision of decisions) {
-    if (decision.action !== "bet") continue;
+): Promise<DecisionLog[]> {
+  const logs: DecisionLog[] = [];
+
+  for (let idx = 0; idx < decisions.length; idx++) {
+    const decision = decisions[idx]!;
+    const base = {
+      idx,
+      action: decision.action,
+      betType: decision.betType,
+      pick: decision.pick,
+      claudeConfidence: decision.confidence,
+      engineLockType: analysis.lockType,
+    };
+
+    if (decision.action !== "bet") {
+      logs.push({ ...base, placed: false, skipReason: "Claude returned action=skip" });
+      continue;
+    }
 
     const autoBetKey = AUTO_BET_MAP[analysis.lockType];
-    if (!autoBetKey || !settings[autoBetKey]) continue;
-    if (decision.confidence < settings.min_confidence) continue;
-    if (!canPlaceBet(state.balance, state.dailyUnits, decision.units, settings))
+    if (!autoBetKey) {
+      logs.push({ ...base, placed: false, skipReason: `Engine: ${analysis.lockType} — no auto-bet for no_lock` });
       continue;
+    }
+    if (!settings[autoBetKey]) {
+      logs.push({ ...base, placed: false, skipReason: `Auto-bet disabled for ${analysis.lockType} (settings.${autoBetKey}=false)` });
+      continue;
+    }
+    if (decision.confidence < settings.min_confidence) {
+      logs.push({ ...base, placed: false, skipReason: `Claude confidence ${decision.confidence}% < min_confidence ${settings.min_confidence}%` });
+      continue;
+    }
+    if (!canPlaceBet(state.balance, state.dailyUnits, decision.units, settings)) {
+      const stake = calculateStake(decision.units, settings.unit_size);
+      logs.push({ ...base, placed: false, skipReason: `Limit hit: balance=$${state.balance} stake=$${stake} dailyUnits=${state.dailyUnits}/${settings.max_daily_units}` });
+      continue;
+    }
 
     const stake = calculateStake(decision.units, settings.unit_size);
     const potentialProfit =
@@ -79,8 +119,13 @@ async function placeBots(
       state.balance -= stake;
       state.dailyUnits += decision.units;
       state.betsPlaced++;
+      logs.push({ ...base, placed: true });
+    } else {
+      logs.push({ ...base, placed: false, skipReason: "DB insert failed", dbError: insertErr.message });
     }
   }
+
+  return logs;
 }
 
 export async function POST(req: NextRequest) {
@@ -229,26 +274,29 @@ export async function POST(req: NextRequest) {
 
           // --- Bot A ---
           let analysisA: GameAnalysisResult | null = null;
+          let logsA: DecisionLog[] = [];
           if (runA) {
             const { analysis, decisions } = await analyzeGameWithClaude(game, settings, "A", todayNotes, matchedPatterns);
             analysisA = analysis;
-            await placeBots(supabase, game, decisions, analysis, "A", settings, botAState);
+            logsA = await placeBots(supabase, game, decisions, analysis, "A", settings, botAState);
           }
 
           // --- Bot B ---
           let analysisB: GameAnalysisResult | null = null;
+          let logsB: DecisionLog[] = [];
           if (runB) {
             const { analysis, decisions } = await analyzeGameWithClaude(game, botBSettings, "B", todayNotes, matchedPatterns);
             analysisB = analysis;
-            await placeBots(supabase, game, decisions, analysis, "B", settings, botBState);
+            logsB = await placeBots(supabase, game, decisions, analysis, "B", settings, botBState);
           }
 
           // --- Bot C (AJ Wordplay) ---
           let analysisC: GameAnalysisResult | null = null;
+          let logsC: DecisionLog[] = [];
           if (runC) {
             const { analysis, decisions } = await analyzeGameWithClaude(game, botCSettings, "C", todayNotes, matchedPatterns);
             analysisC = analysis;
-            await placeBots(supabase, game, decisions, analysis, "C", settings, botCState);
+            logsC = await placeBots(supabase, game, decisions, analysis, "C", settings, botCState);
           }
 
           const primaryAnalysis = analysisA ?? analysisB ?? analysisC;
@@ -273,6 +321,11 @@ export async function POST(req: NextRequest) {
               confidence: primaryAnalysis?.confidence,
               botB: runB ? { lockType: analysisB?.lockType, confidence: analysisB?.confidence } : null,
               botC: runC ? { lockType: analysisC?.lockType, confidence: analysisC?.confidence } : null,
+              decisionLogs: {
+                A: runA ? logsA : null,
+                B: runB ? logsB : null,
+                C: runC ? logsC : null,
+              },
             })
           );
         } catch (err) {
@@ -322,6 +375,13 @@ export async function POST(req: NextRequest) {
           botB: { bets: botBState.betsPlaced, enabled: runB },
           botC: { bets: botCState.betsPlaced, enabled: runC },
           errors,
+          settingsSnapshot: {
+            model: settings.model,
+            min_confidence: settings.min_confidence,
+            auto_bet_triple_locks: settings.auto_bet_triple_locks,
+            auto_bet_double_locks: settings.auto_bet_double_locks,
+            auto_bet_single_locks: settings.auto_bet_single_locks,
+          },
         })
       );
       controller.close();

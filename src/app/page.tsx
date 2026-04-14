@@ -199,7 +199,14 @@ export default function Dashboard() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buf = "";
-      let lastResult = { analyzed: 0, betsPlaced: 0 };
+      let lastResult: {
+        analyzed: number;
+        betsPlaced: number;
+        errors?: string[];
+        settingsSnapshot?: Record<string, unknown>;
+      } = { analyzed: 0, betsPlaced: 0 };
+      const gameErrors: string[] = [];
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -218,14 +225,38 @@ export default function Dashboard() {
                 total: ev.total,
                 label: ev.teams || "",
               });
+            } else if (ev.status === "error") {
+              gameErrors.push(`${ev.teams}: ${ev.error}`);
             }
           } catch { /* skip bad json */ }
         }
       }
-      setStatusMsg(
-        `Analyzed ${lastResult.analyzed} games, placed ${lastResult.betsPlaced} bets`
-      );
-      toast.success(`Placed ${lastResult.betsPlaced} bets`);
+
+      const allErrors = [...gameErrors, ...(lastResult.errors ?? [])];
+
+      // Build detailed status — show skip reasons if no bets placed
+      if (lastResult.betsPlaced === 0 && lastResult.analyzed > 0) {
+        const snap = lastResult.settingsSnapshot as Record<string, unknown> | undefined;
+        const hints: string[] = [];
+        if (allErrors.length > 0) hints.push(`${allErrors.length} Claude error(s) — check model name in Settings`);
+        if (snap) {
+          if (!snap.auto_bet_triple_locks && !snap.auto_bet_double_locks && !snap.auto_bet_single_locks)
+            hints.push("All auto-bet toggles OFF");
+          else if (!snap.auto_bet_double_locks && !snap.auto_bet_single_locks)
+            hints.push("Only Triple Locks auto-bet");
+          hints.push(`Model: ${snap.model} · Min conf: ${snap.min_confidence}%`);
+        }
+        setStatusMsg(`Analyzed ${lastResult.analyzed} games — 0 bets placed. ${hints.join(" · ")}`);
+        toast.error(`0 bets placed — ${hints[0] ?? "check diagnose endpoint"}`);
+      } else {
+        setStatusMsg(`Analyzed ${lastResult.analyzed} games, placed ${lastResult.betsPlaced} bets`);
+        if (lastResult.betsPlaced > 0) toast.success(`Placed ${lastResult.betsPlaced} bets`);
+      }
+
+      if (allErrors.length > 0) {
+        allErrors.forEach((e) => toast.error(e, { duration: 6000 }));
+      }
+
       loadGames();
     } catch (e) {
       toast.error("Analysis failed: " + String(e));
