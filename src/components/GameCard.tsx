@@ -1,34 +1,23 @@
 "use client";
 
-import { RefreshCw } from "lucide-react";
-import type { Game, PaperTrade } from "@/lib/types";
+import { useState } from "react";
+import { RefreshCw, ChevronDown, ChevronUp } from "lucide-react";
+import type { Game, PaperTrade, BookOddsLine } from "@/lib/types";
 import LockBadge from "./LockBadge";
 
 interface GameCardProps {
   game: Game;
-  trade?: PaperTrade;
+  trades?: PaperTrade[];
   onReanalyze?: () => void;
   reanalyzing?: boolean;
   onClick?: () => void;
 }
 
-function formatTime(iso: string | null): string {
-  if (!iso) return "";
-  try {
-    return new Date(iso).toLocaleTimeString("en-US", {
-      hour: "numeric",
-      minute: "2-digit",
-      timeZone: "America/New_York",
-    }) + " ET";
-  } catch {
-    return "";
-  }
-}
-
-function formatOdds(odds: number | null): string {
-  if (odds == null) return "—";
-  return odds > 0 ? `+${odds}` : String(odds);
-}
+const BOT_BADGE: Record<string, string> = {
+  A: "bg-blue-500/20 text-blue-400",
+  B: "bg-cyan-500/20 text-cyan-400",
+  C: "bg-purple-500/20 text-purple-400",
+};
 
 const LEAGUE_COLORS: Record<string, string> = {
   NBA: "bg-orange-500/20 text-orange-400",
@@ -36,8 +25,90 @@ const LEAGUE_COLORS: Record<string, string> = {
   MLB: "bg-red-500/20 text-red-400",
 };
 
-export default function GameCard({ game, trade, onReanalyze, reanalyzing, onClick }: GameCardProps) {
+const BOOK_ORDER = ["Pinnacle", "DraftKings", "FanDuel", "BetMGM", "Caesars"];
+
+function formatOdds(odds: number | null): string {
+  if (odds == null) return "—";
+  return odds > 0 ? `+${odds}` : String(odds);
+}
+
+function formatTime(iso: string | null): string {
+  if (!iso) return "";
+  try {
+    return (
+      new Date(iso).toLocaleTimeString("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+        timeZone: "America/New_York",
+      }) + " ET"
+    );
+  } catch {
+    return "";
+  }
+}
+
+function BookLinesTable({
+  books,
+  homeTeam,
+  awayTeam,
+}: {
+  books: Record<string, BookOddsLine>;
+  homeTeam: string;
+  awayTeam: string;
+}) {
+  const homeShort = homeTeam.split(" ").pop() ?? homeTeam;
+  const awayShort = awayTeam.split(" ").pop() ?? awayTeam;
+  const orderedBooks = BOOK_ORDER.filter((b) => books[b]);
+  const extraBooks = Object.keys(books).filter((b) => !BOOK_ORDER.includes(b));
+  const allBooks = [...orderedBooks, ...extraBooks];
+
+  if (allBooks.length === 0) return null;
+
+  return (
+    <div className="mt-2 pt-2 border-t border-border">
+      <div className="text-[9px] uppercase tracking-wider text-muted mb-1.5">
+        Book Lines
+      </div>
+      <table className="w-full text-[10px] font-[family-name:var(--font-mono)]">
+        <thead>
+          <tr className="text-muted">
+            <th className="text-left font-normal pb-0.5">Book</th>
+            <th className="text-right font-normal pb-0.5">{awayShort}</th>
+            <th className="text-right font-normal pb-0.5">{homeShort}</th>
+            <th className="text-right font-normal pb-0.5">O/U</th>
+          </tr>
+        </thead>
+        <tbody>
+          {allBooks.map((bookName) => {
+            const line = books[bookName];
+            return (
+              <tr key={bookName} className="border-t border-border/50">
+                <td className="py-0.5 text-muted">{bookName}</td>
+                <td className="py-0.5 text-right">{formatOdds(line.moneylineAway)}</td>
+                <td className="py-0.5 text-right">{formatOdds(line.moneylineHome)}</td>
+                <td className="py-0.5 text-right text-muted">
+                  {line.overUnderLine ?? "—"}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+export default function GameCard({
+  game,
+  trades = [],
+  onReanalyze,
+  reanalyzing,
+  onClick,
+}: GameCardProps) {
+  const [showBooks, setShowBooks] = useState(false);
   const odds = game.polymarket_odds;
+  const hasBets = trades.length > 0;
+
   const statusDisplay =
     game.status === "final"
       ? "FINAL"
@@ -52,11 +123,23 @@ export default function GameCard({ game, trade, onReanalyze, reanalyzing, onClic
         ? "text-muted"
         : "text-text";
 
+  // Best available: prefer The Odds API best, fall back to polymarket
+  const showBestML =
+    odds?.bestMoneylineHome != null || odds?.moneylineHome != null;
+  const homeML = odds?.bestMoneylineHome ?? odds?.moneylineHome ?? null;
+  const awayML = odds?.bestMoneylineAway ?? odds?.moneylineAway ?? null;
+  const ouLine = odds?.bestOverLine ?? odds?.overUnderLine ?? null;
+  const bestHomeBook = odds?.bestBookHome;
+  const bestAwayBook = odds?.bestBookAway;
+
+  const hasBooks =
+    odds?.books != null && Object.keys(odds.books).length > 0;
+
   return (
     <div
       onClick={onClick}
       className={`card hover:border-border-accent transition-colors ${
-        trade ? "border-l-2 border-l-success" : ""
+        hasBets ? "border-l-2 border-l-success" : ""
       } ${onClick ? "cursor-pointer" : ""}`}
     >
       {/* Header */}
@@ -76,7 +159,7 @@ export default function GameCard({ game, trade, onReanalyze, reanalyzing, onClic
         <div className="flex items-center gap-2">
           {onReanalyze && (
             <button
-              onClick={onReanalyze}
+              onClick={(e) => { e.stopPropagation(); onReanalyze(); }}
               disabled={reanalyzing}
               title="Re-analyze this game"
               className="text-muted hover:text-accent transition-colors disabled:opacity-40"
@@ -117,33 +200,80 @@ export default function GameCard({ game, trade, onReanalyze, reanalyzing, onClic
       {/* Lock badge + confidence */}
       {game.analyzed && (
         <div className="flex items-center justify-center gap-2 mb-2">
-          <LockBadge lockType={trade?.lock_type || game.lock_type || "no_lock"} />
-          {(trade?.confidence != null || game.gematria_confidence != null) && (
+          <LockBadge lockType={trades[0]?.lock_type || game.lock_type || "no_lock"} />
+          {(trades[0]?.confidence != null || game.gematria_confidence != null) && (
             <span className="text-[10px] text-muted">
-              {Math.round(trade?.confidence ?? game.gematria_confidence ?? 0)}%
+              {Math.round(trades[0]?.confidence ?? game.gematria_confidence ?? 0)}%
             </span>
           )}
         </div>
       )}
 
-      {/* Odds */}
-      {odds && (odds.moneylineHome != null || odds.overUnderLine != null) && (
-        <div className="text-[10px] text-muted text-center mb-2 font-[family-name:var(--font-mono)]">
-          {odds.moneylineHome != null && (
-            <span>
-              ML: {formatOdds(odds.moneylineHome)} / {formatOdds(odds.moneylineAway)}
-            </span>
-          )}
-          {odds.overUnderLine != null && (
-            <span className="ml-2">O/U: {odds.overUnderLine}</span>
+      {/* Best available lines */}
+      {showBestML && (
+        <div className="text-[10px] text-center mb-1 font-[family-name:var(--font-mono)]">
+          <div className="text-muted">
+            {bestAwayBook && (
+              <span className="text-[9px] text-success mr-0.5">
+                {bestAwayBook.slice(0, 3).toUpperCase()}
+              </span>
+            )}
+            <span>{formatOdds(awayML)}</span>
+            <span className="text-muted mx-1">/</span>
+            {bestHomeBook && (
+              <span className="text-[9px] text-success mr-0.5">
+                {bestHomeBook.slice(0, 3).toUpperCase()}
+              </span>
+            )}
+            <span>{formatOdds(homeML)}</span>
+            {ouLine != null && (
+              <span className="ml-2 text-muted">O/U {ouLine}</span>
+            )}
+          </div>
+          {odds?.bestMoneylineHome != null && (
+            <div className="text-[9px] text-muted mt-0.5">best available</div>
           )}
         </div>
       )}
 
-      {/* Trade info */}
-      {trade && (
-        <div className="text-xs text-success text-center font-medium mt-1 pt-2 border-t border-border">
-          BET: {trade.pick}, {trade.units}u
+      {/* Expandable book comparison */}
+      {hasBooks && (
+        <div onClick={(e) => e.stopPropagation()}>
+          <button
+            onClick={() => setShowBooks(!showBooks)}
+            className="flex items-center gap-1 text-[10px] text-muted hover:text-text transition-colors mx-auto mt-1"
+          >
+            {showBooks ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+            {showBooks ? "Hide lines" : "All books"}
+          </button>
+          {showBooks && odds?.books && (
+            <BookLinesTable
+              books={odds.books}
+              homeTeam={game.home_team}
+              awayTeam={game.away_team}
+            />
+          )}
+        </div>
+      )}
+
+      {/* Bot picks */}
+      {hasBets && (
+        <div className="mt-2 pt-2 border-t border-border space-y-1">
+          {trades.map((t) => (
+            <div
+              key={t.id}
+              className="flex items-center gap-1.5 text-xs justify-center"
+            >
+              <span
+                className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${BOT_BADGE[t.bot] ?? "bg-surface text-muted"}`}
+              >
+                {t.bot}
+              </span>
+              <span className="text-success font-medium truncate">
+                {t.pick} · {t.units}u
+              </span>
+            </div>
+          ))}
         </div>
       )}
     </div>

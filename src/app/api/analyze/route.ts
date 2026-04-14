@@ -33,10 +33,13 @@ function extractOpeningLine(
 ): number | null {
   const odds = game.polymarket_odds;
   if (!odds) return null;
-  if (betType === "over_under") return odds.overUnderLine ?? null;
+  // Prefer Pinnacle (sharpest book) for CLV benchmark; fall back to polymarket
+  if (betType === "over_under") {
+    return odds.pinnacleOverUnderLine ?? odds.overUnderLine ?? null;
+  }
   if (betType === "moneyline") {
-    if (pickedSide === "home") return odds.moneylineHome ?? null;
-    if (pickedSide === "away") return odds.moneylineAway ?? null;
+    if (pickedSide === "home") return odds.pinnacleMoneylineHome ?? odds.moneylineHome ?? null;
+    if (pickedSide === "away") return odds.pinnacleMoneylineAway ?? odds.moneylineAway ?? null;
   }
   return null;
 }

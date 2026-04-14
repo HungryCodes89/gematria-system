@@ -276,8 +276,11 @@ export default function Dashboard() {
     loadGames();
   }
 
-  const tradeMap = new Map<string, PaperTrade>();
-  trades.forEach((t) => tradeMap.set(t.game_id, t));
+  const tradesByGame = new Map<string, PaperTrade[]>();
+  trades.forEach((t) => {
+    if (!tradesByGame.has(t.game_id)) tradesByGame.set(t.game_id, []);
+    tradesByGame.get(t.game_id)!.push(t);
+  });
 
   return (
     <div className="min-h-screen">
@@ -429,7 +432,7 @@ export default function Dashboard() {
               <GameCard
                 key={game.id}
                 game={game}
-                trade={tradeMap.get(game.id)}
+                trades={tradesByGame.get(game.id) ?? []}
                 onReanalyze={() => handleReanalyze(game.id)}
                 reanalyzing={reanalyzingId === game.id}
                 onClick={() => setSelectedGame(game)}

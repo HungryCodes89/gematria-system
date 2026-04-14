@@ -3,6 +3,7 @@ import { getTodayET } from '@/lib/date-utils'
 import { fetchNBAGames, fetchNHLGames, fetchMLBGames } from '@/lib/sports-api'
 import type { ESPNGame, NHLGame } from '@/lib/sports-api'
 import { fetchPolymarketOdds, filterSnapshotsForGame, consolidateOdds } from '@/lib/odds-api'
+import { fetchOddsForLeague, matchOddsApiGame } from '@/lib/the-odds-api'
 import { isFullMoon } from '@/lib/moon-phase'
 import { getSupabaseAdmin } from '@/lib/supabase-server'
 
@@ -133,34 +134,56 @@ export async function POST() {
       }
     }
 
-    // Fetch Polymarket odds for all 3 leagues in parallel
-    const [nbaOdds, nhlOdds, mlbOdds] = await Promise.all([
+    // Fetch Polymarket + The Odds API for all 3 leagues in parallel
+    const [nbaOdds, nhlOdds, mlbOdds, nbaApi, nhlApi, mlbApi] = await Promise.all([
       fetchPolymarketOdds('NBA').catch(() => []),
       fetchPolymarketOdds('NHL').catch(() => []),
       fetchPolymarketOdds('MLB').catch(() => []),
+      fetchOddsForLeague('NBA').catch(() => []),
+      fetchOddsForLeague('NHL').catch(() => []),
+      fetchOddsForLeague('MLB').catch(() => []),
     ])
     const allOdds = [...nbaOdds, ...nhlOdds, ...mlbOdds]
+    const oddsApiGames: Record<string, typeof nbaApi> = { NBA: nbaApi, NHL: nhlApi, MLB: mlbApi }
 
     let oddsMatched = 0
     for (const row of rows) {
-      const matched = filterSnapshotsForGame(allOdds, row.home_team, row.away_team, {
+      const polyMatched = filterSnapshotsForGame(allOdds, row.home_team, row.away_team, {
         league: row.league,
         gameDate: today,
       })
-      if (matched.length === 0) continue
+      const consolidated = polyMatched.length > 0 ? consolidateOdds(polyMatched) : null
+      const apiMatch = matchOddsApiGame(oddsApiGames[row.league] ?? [], row.home_team, row.away_team)
 
-      const consolidated = consolidateOdds(matched)
+      if (!consolidated && !apiMatch) continue
+
+      const pinnacle = apiMatch?.books['Pinnacle'] ?? null
+
       const oddsJson = {
-        moneylineHome: consolidated.moneyline?.home ?? null,
-        moneylineAway: consolidated.moneyline?.away ?? null,
-        spreadLine: consolidated.spread?.line ?? null,
-        spreadHomeOdds: consolidated.spread?.homeOdds ?? null,
-        spreadAwayOdds: consolidated.spread?.awayOdds ?? null,
-        overUnderLine: consolidated.overUnder?.line ?? null,
-        overOdds: consolidated.overUnder?.overOdds ?? null,
-        underOdds: consolidated.overUnder?.underOdds ?? null,
-        impliedProbHome: consolidated.impliedProbability?.home ?? null,
-        impliedProbAway: consolidated.impliedProbability?.away ?? null,
+        // Polymarket base lines (fallback to Pinnacle if polymarket missed)
+        moneylineHome: consolidated?.moneyline?.home ?? apiMatch?.bestMoneylineHome ?? null,
+        moneylineAway: consolidated?.moneyline?.away ?? apiMatch?.bestMoneylineAway ?? null,
+        spreadLine: consolidated?.spread?.line ?? null,
+        spreadHomeOdds: consolidated?.spread?.homeOdds ?? null,
+        spreadAwayOdds: consolidated?.spread?.awayOdds ?? null,
+        overUnderLine: consolidated?.overUnder?.line ?? apiMatch?.bestOverLine ?? null,
+        overOdds: consolidated?.overUnder?.overOdds ?? apiMatch?.bestOverOdds ?? null,
+        underOdds: consolidated?.overUnder?.underOdds ?? apiMatch?.bestUnderOdds ?? null,
+        impliedProbHome: consolidated?.impliedProbability?.home ?? null,
+        impliedProbAway: consolidated?.impliedProbability?.away ?? null,
+        // The Odds API per-book data
+        books: apiMatch?.books ?? null,
+        bestMoneylineHome: apiMatch?.bestMoneylineHome ?? null,
+        bestMoneylineAway: apiMatch?.bestMoneylineAway ?? null,
+        bestBookHome: apiMatch?.bestBookHome ?? null,
+        bestBookAway: apiMatch?.bestBookAway ?? null,
+        bestOverOdds: apiMatch?.bestOverOdds ?? null,
+        bestUnderOdds: apiMatch?.bestUnderOdds ?? null,
+        bestOverLine: apiMatch?.bestOverLine ?? null,
+        // Pinnacle as sharp reference
+        pinnacleMoneylineHome: pinnacle?.moneylineHome ?? null,
+        pinnacleMoneylineAway: pinnacle?.moneylineAway ?? null,
+        pinnacleOverUnderLine: pinnacle?.overUnderLine ?? null,
       }
 
       const { error: oddsErr } = await sb
@@ -176,6 +199,7 @@ export async function POST() {
       date: today,
       games: { nba: nbaRaw.length, nhl: nhlRaw.length, mlb: mlbRaw.length },
       oddsMatched,
+      oddsApiGames: { nba: nbaApi.length, nhl: nhlApi.length, mlb: mlbApi.length },
       total: rows.length,
     })
   } catch (err: any) {

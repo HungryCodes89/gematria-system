@@ -29,7 +29,16 @@ export interface Game {
 
 // ── Odds (cached on game row as JSONB) ──
 
+export interface BookOddsLine {
+  moneylineHome: number | null;
+  moneylineAway: number | null;
+  overUnderLine: number | null;
+  overOdds: number | null;
+  underOdds: number | null;
+}
+
 export interface ConsolidatedOdds {
+  // Polymarket base
   moneylineHome: number | null;
   moneylineAway: number | null;
   spreadLine: number | null;
@@ -40,6 +49,18 @@ export interface ConsolidatedOdds {
   underOdds: number | null;
   impliedProbHome: number | null;
   impliedProbAway: number | null;
+  // The Odds API — per-book lines and best available
+  books?: Record<string, BookOddsLine> | null;
+  bestMoneylineHome?: number | null;
+  bestMoneylineAway?: number | null;
+  bestBookHome?: string | null;
+  bestBookAway?: string | null;
+  bestOverOdds?: number | null;
+  bestUnderOdds?: number | null;
+  bestOverLine?: number | null;
+  pinnacleMoneylineHome?: number | null;
+  pinnacleMoneylineAway?: number | null;
+  pinnacleOverUnderLine?: number | null;
 }
 
 // ── Trade Decision (Claude output) ──

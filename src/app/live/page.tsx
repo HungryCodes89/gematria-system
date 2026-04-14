@@ -140,9 +140,9 @@ function ComparisonCard({ comp }: { comp: GameComparison }) {
       <div className="grid grid-cols-3 gap-2 border-t border-border pt-3">
         {/* Bot A */}
         <div>
-          <div className="text-[10px] font-bold tracking-widest uppercase text-muted mb-2">
+          <div className="text-[10px] font-bold tracking-widest uppercase text-blue-400 mb-2">
             Bot A
-            <span className="normal-case font-normal ml-1 hidden sm:inline">· Basic</span>
+            <span className="normal-case font-normal text-muted ml-1 hidden sm:inline">· Basic</span>
           </div>
           {comp.botA.length === 0 ? (
             <NoBet />
@@ -174,7 +174,7 @@ function ComparisonCard({ comp }: { comp: GameComparison }) {
 
         {/* Bot C */}
         <div className="border-l border-border pl-2">
-          <div className="text-[10px] font-bold tracking-widest uppercase text-warning mb-2">
+          <div className="text-[10px] font-bold tracking-widest uppercase text-purple-400 mb-2">
             Bot C
             <span className="normal-case font-normal text-muted ml-1 hidden sm:inline">· AJ</span>
           </div>
