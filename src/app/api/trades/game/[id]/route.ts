@@ -5,10 +5,10 @@ export const dynamic = "force-dynamic";
 
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const supabase = getSupabaseAdmin();
-  const { id } = params;
+  const { id } = await params;
 
   const { data, error } = await supabase
     .from("paper_trades")
