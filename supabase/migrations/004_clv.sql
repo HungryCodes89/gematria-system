@@ -1,0 +1,3 @@
+ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS opening_line DECIMAL;
+ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS closing_line DECIMAL;
+ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS clv_percent DECIMAL;

@@ -79,6 +79,9 @@ export interface PaperTrade {
   confidence: number | null;
   lock_type: string | null;
   reasoning: string | null;
+  opening_line: number | null;
+  closing_line: number | null;
+  clv_percent: number | null;
   placed_at: string;
   settled_at: string | null;
   game?: Game;

@@ -35,6 +35,10 @@ function formatPL(pl: number): string {
   return pl > 0 ? `+$${pl.toFixed(0)}` : `-$${Math.abs(pl).toFixed(0)}`;
 }
 
+function formatClv(clv: number): string {
+  return clv >= 0 ? `+${clv.toFixed(2)}` : clv.toFixed(2);
+}
+
 export default function TradeCard({ trade }: TradeCardProps) {
   const [expanded, setExpanded] = useState(false);
   const game = trade.game;
@@ -60,10 +64,12 @@ export default function TradeCard({ trade }: TradeCardProps) {
               className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
                 trade.bot === "B"
                   ? "bg-accent/20 text-accent"
+                  : trade.bot === "C"
+                  ? "bg-purple-500/20 text-purple-400"
                   : "bg-surface text-muted"
               }`}
             >
-              {trade.bot === "B" ? "BOT B" : "BOT A"}
+              BOT {trade.bot || "A"}
             </span>
             <span className="text-xs text-muted">{dateStr}</span>
           </div>
@@ -92,6 +98,15 @@ export default function TradeCard({ trade }: TradeCardProps) {
               </span>
             )}
           </div>
+          {trade.clv_percent != null && (
+            <div
+              className={`font-[family-name:var(--font-mono)] text-[10px] mt-0.5 ${
+                trade.clv_percent >= 0 ? "text-success" : "text-danger"
+              }`}
+            >
+              CLV {formatClv(trade.clv_percent)}
+            </div>
+          )}
         </div>
       </div>
 

@@ -26,6 +26,21 @@ function sse(data: unknown): string {
   return `data: ${JSON.stringify(data)}\n\n`;
 }
 
+function extractOpeningLine(
+  game: Game,
+  betType: string,
+  pickedSide: string | null
+): number | null {
+  const odds = game.polymarket_odds;
+  if (!odds) return null;
+  if (betType === "over_under") return odds.overUnderLine ?? null;
+  if (betType === "moneyline") {
+    if (pickedSide === "home") return odds.moneylineHome ?? null;
+    if (pickedSide === "away") return odds.moneylineAway ?? null;
+  }
+  return null;
+}
+
 interface DecisionLog {
   idx: number;
   action: string;
@@ -110,6 +125,7 @@ async function placeBots(
         confidence: decision.confidence,
         lock_type: analysis.lockType,
         reasoning: decision.reasoning,
+        opening_line: extractOpeningLine(game, decision.betType, decision.pickedSide),
         placed_at: new Date().toISOString(),
       })
       .select("id")
