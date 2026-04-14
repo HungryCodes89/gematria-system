@@ -63,7 +63,7 @@ async function placeBots(
   analysis: GameAnalysisResult,
   bot: "A" | "B" | "C",
   settings: GematriaSettings,
-  state: { balance: number; dailyUnits: number; betsPlaced: number }
+  state: { balance: number; dailyUnits: number; betsPlaced: number; gameIds: Set<string> }
 ): Promise<DecisionLog[]> {
   const logs: DecisionLog[] = [];
 
@@ -139,6 +139,7 @@ async function placeBots(
       state.balance -= stake;
       state.dailyUnits += decision.units;
       state.betsPlaced++;
+      state.gameIds.add(game.id);
       logs.push({ ...base, placed: true });
     } else {
       logs.push({ ...base, placed: false, skipReason: "DB insert failed", dbError: insertErr.message });
@@ -190,17 +191,19 @@ export async function POST(req: NextRequest) {
   const runB = (botParam === "all" || botParam === "B") && Boolean(settings.bot_b_system_prompt);
   const runC = (botParam === "all" || botParam === "C") && Boolean(settings.bot_c_system_prompt);
 
-  // Single-game re-analyze: mark unanalyzed first, then fetch just that game
+  // Single-game re-analyze: reset analyzed flag so it gets re-processed
   if (gameIdParam) {
     await supabase.from("games").update({ analyzed: false }).eq("id", gameIdParam);
   }
 
+  // Fetch all today's games (not just unanalyzed) so Bots B/C can run on games Bot A already marked
   const gamesQuery = gameIdParam
     ? supabase.from("games").select("*").eq("id", gameIdParam)
-    : supabase.from("games").select("*").eq("game_date", today).eq("analyzed", false);
+    : supabase.from("games").select("*").eq("game_date", today);
 
   const { data: games } = await gamesQuery;
   const unanalyzed: Game[] = (games ?? []) as Game[];
+  console.log(`[analyze] runA=${runA} runB=${runB} runC=${runC} games=${unanalyzed.length} bot=${botParam}`);
 
   // Fetch today's decode notes once and inject into all bot prompts
   const { data: notesRow } = await supabase
@@ -235,23 +238,23 @@ export async function POST(req: NextRequest) {
 
   const balance = ledgerRow?.balance ?? settings.starting_bankroll;
 
-  // Query each bot's daily units independently
+  // Query each bot's daily trades — units for limit tracking, game_id for dedup
   const [botARes, botBRes, botCRes] = await Promise.all([
     supabase
       .from("paper_trades")
-      .select("units")
+      .select("units, game_id")
       .eq("bot", "A")
       .gte("placed_at", `${today}T00:00:00`)
       .lt("placed_at", `${today}T23:59:59.999`),
     supabase
       .from("paper_trades")
-      .select("units")
+      .select("units, game_id")
       .eq("bot", "B")
       .gte("placed_at", `${today}T00:00:00`)
       .lt("placed_at", `${today}T23:59:59.999`),
     supabase
       .from("paper_trades")
-      .select("units")
+      .select("units, game_id")
       .eq("bot", "C")
       .gte("placed_at", `${today}T00:00:00`)
       .lt("placed_at", `${today}T23:59:59.999`),
@@ -261,17 +264,23 @@ export async function POST(req: NextRequest) {
     balance,
     dailyUnits: (botARes.data ?? []).reduce((s: number, t: { units: number }) => s + (t.units ?? 0), 0),
     betsPlaced: 0,
+    gameIds: new Set<string>((botARes.data ?? []).map((t: { game_id: string }) => t.game_id).filter(Boolean)),
   };
   const botBState = {
     balance,
     dailyUnits: (botBRes.data ?? []).reduce((s: number, t: { units: number }) => s + (t.units ?? 0), 0),
     betsPlaced: 0,
+    gameIds: new Set<string>((botBRes.data ?? []).map((t: { game_id: string }) => t.game_id).filter(Boolean)),
   };
   const botCState = {
     balance,
     dailyUnits: (botCRes.data ?? []).reduce((s: number, t: { units: number }) => s + (t.units ?? 0), 0),
     betsPlaced: 0,
+    gameIds: new Set<string>((botCRes.data ?? []).map((t: { game_id: string }) => t.game_id).filter(Boolean)),
   };
+  console.log(`[analyze] Bot A today: ${botAState.dailyUnits}u, ${botAState.gameIds.size} games`);
+  console.log(`[analyze] Bot B today: ${botBState.dailyUnits}u, ${botBState.gameIds.size} games`);
+  console.log(`[analyze] Bot C today: ${botCState.dailyUnits}u, ${botCState.gameIds.size} games`);
 
   const total = unanalyzed.length;
   let analyzed = 0;
@@ -295,40 +304,56 @@ export async function POST(req: NextRequest) {
           // --- Bot A ---
           let analysisA: GameAnalysisResult | null = null;
           let logsA: DecisionLog[] = [];
-          if (runA) {
+          const skipA = runA && botAState.gameIds.has(game.id);
+          if (runA && !skipA) {
+            console.log(`[analyze] Bot A analyzing ${game.away_team} @ ${game.home_team}`);
             const { analysis, decisions } = await analyzeGameWithClaude(game, settings, "A", todayNotes, matchedPatterns);
             analysisA = analysis;
             logsA = await placeBots(supabase, game, decisions, analysis, "A", settings, botAState);
+          } else if (skipA) {
+            console.log(`[analyze] Bot A skip — already bet game ${game.id}`);
           }
 
           // --- Bot B ---
           let analysisB: GameAnalysisResult | null = null;
           let logsB: DecisionLog[] = [];
-          if (runB) {
+          const skipB = runB && botBState.gameIds.has(game.id);
+          if (runB && !skipB) {
+            console.log(`[analyze] Bot B analyzing ${game.away_team} @ ${game.home_team}`);
             const { analysis, decisions } = await analyzeGameWithClaude(game, botBSettings, "B", todayNotes, matchedPatterns);
             analysisB = analysis;
             logsB = await placeBots(supabase, game, decisions, analysis, "B", settings, botBState);
+          } else if (skipB) {
+            console.log(`[analyze] Bot B skip — already bet game ${game.id}`);
           }
 
           // --- Bot C (AJ Wordplay) ---
           let analysisC: GameAnalysisResult | null = null;
           let logsC: DecisionLog[] = [];
-          if (runC) {
+          const skipC = runC && botCState.gameIds.has(game.id);
+          if (runC && !skipC) {
+            console.log(`[analyze] Bot C analyzing ${game.away_team} @ ${game.home_team}`);
             const { analysis, decisions } = await analyzeGameWithClaude(game, botCSettings, "C", todayNotes, matchedPatterns);
             analysisC = analysis;
             logsC = await placeBots(supabase, game, decisions, analysis, "C", settings, botCState);
+          } else if (skipC) {
+            console.log(`[analyze] Bot C skip — already bet game ${game.id}`);
           }
 
           const primaryAnalysis = analysisA ?? analysisB ?? analysisC;
+          const anyBotRan = analysisA || analysisB || analysisC;
 
-          await supabase
-            .from("games")
-            .update({
-              analyzed: true,
-              lock_type: primaryAnalysis?.lockType ?? "no_lock",
-              gematria_confidence: primaryAnalysis?.confidence ?? 0,
-            })
-            .eq("id", game.id);
+          // Only update game metadata when at least one bot ran (avoid overwriting with nulls)
+          if (anyBotRan) {
+            await supabase
+              .from("games")
+              .update({
+                analyzed: true,
+                lock_type: primaryAnalysis?.lockType ?? "no_lock",
+                gematria_confidence: primaryAnalysis?.confidence ?? 0,
+              })
+              .eq("id", game.id);
+          }
 
           analyzed++;
           controller.enqueue(
