@@ -20,6 +20,7 @@ interface GameComparison {
   botA: PaperTrade[];
   botB: PaperTrade[];
   botC: PaperTrade[];
+  botD: PaperTrade[];
 }
 
 const LEAGUE_COLORS: Record<string, string> = {
@@ -102,7 +103,7 @@ function ComparisonCard({ comp }: { comp: GameComparison }) {
         : formatTime(game.start_time);
 
   // Check if bots agree on their primary pick (only count bots that placed a bet)
-  const activePicks = [comp.botA[0]?.pick, comp.botB[0]?.pick, comp.botC[0]?.pick].filter(Boolean);
+  const activePicks = [comp.botA[0]?.pick, comp.botB[0]?.pick, comp.botC[0]?.pick, comp.botD[0]?.pick].filter(Boolean);
   const agree = activePicks.length > 1 && activePicks.every((p) => p === activePicks[0]);
   const diverge = activePicks.length > 1 && !agree;
 
@@ -136,8 +137,8 @@ function ComparisonCard({ comp }: { comp: GameComparison }) {
         {game.home_team}
       </div>
 
-      {/* Three-column comparison */}
-      <div className="grid grid-cols-3 gap-2 border-t border-border pt-3">
+      {/* Four-column comparison */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 border-t border-border pt-3">
         {/* Bot A */}
         <div>
           <div className="text-[10px] font-bold tracking-widest uppercase text-blue-400 mb-2">
@@ -188,6 +189,23 @@ function ComparisonCard({ comp }: { comp: GameComparison }) {
             </div>
           )}
         </div>
+
+        {/* Bot D */}
+        <div className="border-l border-border pl-2">
+          <div className="text-[10px] font-bold tracking-widest uppercase text-orange-400 mb-2">
+            Bot D
+            <span className="normal-case font-normal text-muted ml-1 hidden sm:inline">· Narrative</span>
+          </div>
+          {comp.botD.length === 0 ? (
+            <NoBet />
+          ) : (
+            <div className="space-y-3">
+              {comp.botD.map((t) => (
+                <BotPickCard key={t.id} trade={t} />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -221,12 +239,14 @@ export default function LivePage() {
           botA: [],
           botB: [],
           botC: [],
+          botD: [],
         });
       }
       const comp = map.get(trade.game_id)!;
       if (trade.bot === "A") comp.botA.push(trade);
       else if (trade.bot === "B") comp.botB.push(trade);
       else if (trade.bot === "C") comp.botC.push(trade);
+      else if (trade.bot === "D") comp.botD.push(trade);
     }
     return Array.from(map.values());
   })();
@@ -234,6 +254,7 @@ export default function LivePage() {
   const botACount = trades.filter((t) => t.bot === "A").length;
   const botBCount = trades.filter((t) => t.bot === "B").length;
   const botCCount = trades.filter((t) => t.bot === "C").length;
+  const botDCount = trades.filter((t) => t.bot === "D").length;
 
   return (
     <div className="min-h-screen">
@@ -244,7 +265,7 @@ export default function LivePage() {
         </h1>
 
         {/* Bankroll strip */}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-4">
+        <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 mb-4">
           <StatCard
             label="Balance"
             value={`$${(bankroll?.balance ?? 10000).toLocaleString()}`}
@@ -257,6 +278,7 @@ export default function LivePage() {
           <StatCard label="Bot A" value={botACount} />
           <StatCard label="Bot B" value={botBCount} color="success" />
           <StatCard label="Bot C" value={botCCount} color="warning" />
+          <StatCard label="Bot D" value={botDCount} color="danger" />
         </div>
 
         {/* Comparison list */}

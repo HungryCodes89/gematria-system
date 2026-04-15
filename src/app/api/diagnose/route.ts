@@ -150,7 +150,7 @@ export async function GET() {
   }
 
   knownIssues.push(
-    "SQL fix required — paper_trades bot constraint only allows ('A','B'), blocking Bot C bets. Run: ALTER TABLE paper_trades DROP CONSTRAINT IF EXISTS paper_trades_bot_check; ALTER TABLE paper_trades ADD CONSTRAINT paper_trades_bot_check CHECK (bot IN ('A', 'B', 'C'));"
+    "SQL fix required — paper_trades bot constraint only allows ('A','B'), blocking Bots C and D. Run: ALTER TABLE paper_trades DROP CONSTRAINT IF EXISTS paper_trades_bot_check; ALTER TABLE paper_trades ADD CONSTRAINT paper_trades_bot_check CHECK (bot IN ('A', 'B', 'C', 'D'));"
   );
 
   return Response.json({

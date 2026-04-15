@@ -26,13 +26,14 @@ import GameDetailModal from "@/components/GameDetailModal";
 import SettleModal from "@/components/SettleModal";
 
 type League = "ALL" | "NBA" | "NHL" | "MLB";
-type BotSelection = "all" | "A" | "B" | "C";
+type BotSelection = "all" | "A" | "B" | "C" | "D";
 
 const BOT_LABELS: Record<BotSelection, string> = {
   all: "All Bots",
   A: "Bot A",
   B: "Bot B",
   C: "Bot C — AJ",
+  D: "Bot D — Narrative",
 };
 
 export default function Dashboard() {
@@ -387,7 +388,7 @@ export default function Dashboard() {
         {/* Bot selector */}
         <div className="flex items-center gap-2 mb-4">
           <span className="text-xs text-muted uppercase tracking-wider">Bot:</span>
-          {(["all", "A", "B", "C"] as BotSelection[]).map((b) => (
+          {(["all", "A", "B", "C", "D"] as BotSelection[]).map((b) => (
             <button
               key={b}
               onClick={() => setSelectedBot(b)}

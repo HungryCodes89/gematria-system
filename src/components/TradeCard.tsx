@@ -66,6 +66,8 @@ export default function TradeCard({ trade }: TradeCardProps) {
                   ? "bg-accent/20 text-accent"
                   : trade.bot === "C"
                   ? "bg-purple-500/20 text-purple-400"
+                  : trade.bot === "D"
+                  ? "bg-orange-500/20 text-orange-400"
                   : "bg-surface text-muted"
               }`}
             >

@@ -45,6 +45,7 @@ const BOT_BADGE: Record<string, string> = {
   "Bot A": "bg-blue-500/20 text-blue-400",
   "Bot B": "bg-cyan-500/20 text-cyan-400",
   "Bot C": "bg-purple-500/20 text-purple-400",
+  "Bot D": "bg-orange-500/20 text-orange-400",
 };
 
 const MEDALS = ["🥇", "🥈", "🥉"];

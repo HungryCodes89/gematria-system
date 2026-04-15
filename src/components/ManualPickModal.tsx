@@ -12,7 +12,7 @@ interface ManualPickModalProps {
 
 export default function ManualPickModal({ games, onClose, onSaved }: ManualPickModalProps) {
   const [gameId, setGameId] = useState(games[0]?.id ?? "");
-  const [bot, setBot] = useState<"A" | "B" | "C">("A");
+  const [bot, setBot] = useState<"A" | "B" | "C" | "D">("A");
   const [betType, setBetType] = useState<"moneyline" | "over_under">("moneyline");
   const [pick, setPick] = useState("");
   const [pickedSide, setPickedSide] = useState<"home" | "away" | "">("");
@@ -102,12 +102,13 @@ export default function ManualPickModal({ games, onClose, onSaved }: ManualPickM
               </label>
               <select
                 value={bot}
-                onChange={(e) => setBot(e.target.value as "A" | "B" | "C")}
+                onChange={(e) => setBot(e.target.value as "A" | "B" | "C" | "D")}
                 className="w-full bg-surface border border-border rounded px-2 py-1.5 text-sm text-text"
               >
                 <option value="A">Bot A — Basic</option>
                 <option value="B">Bot B — HUNGRY</option>
                 <option value="C">Bot C — AJ</option>
+                <option value="D">Bot D — Narrative Scout</option>
               </select>
             </div>
 

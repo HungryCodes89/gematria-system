@@ -168,7 +168,7 @@ function formatOdds(odds: ConsolidatedOdds | null): string {
   return parts.length ? parts.join("\n") : "No market odds available.";
 }
 
-function buildUserMessage(game: Game, analysis: GameAnalysis, bot?: "A" | "B" | "C", notes?: string, matchedPatterns?: MatchedPattern[]): string {
+function buildUserMessage(game: Game, analysis: GameAnalysis, bot?: "A" | "B" | "C" | "D", notes?: string, matchedPatterns?: MatchedPattern[]): string {
   const dn = analysis.dateNumerology;
   const moonIll = getMoonIllumination(new Date(game.game_date + "T17:00:00Z"));
   const fullMoon = isFullMoon(game.game_date);
@@ -333,7 +333,7 @@ function robustJsonParse(raw: string): TradeDecision[] {
 export async function analyzeGameWithClaude(
   game: Game,
   settings: GematriaSettings,
-  bot?: "A" | "B" | "C",
+  bot?: "A" | "B" | "C" | "D",
   notes?: string,
   matchedPatterns?: MatchedPattern[]
 ): Promise<{ analysis: GameAnalysisResult; decisions: TradeDecision[] }> {

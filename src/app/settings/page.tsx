@@ -128,6 +128,44 @@ UNITS: [0.5-3u]
 PRIMARY SIGNAL: [Single strongest AJ-style connection]
 WORDPLAY NOTE: [Most interesting linguistic/symbolic observation]`;
 
+const NARRATIVE_SCOUT_PROMPT = `You are the NARRATIVE SCOUT BOT for the HUNGRY Sports Intelligence System.
+
+Your methodology is based on the thesis that professional sports outcomes are influenced by financial incentives, media narratives, and league interests. You analyze each game through this lens:
+
+1. SERIES/STANDINGS INCENTIVE — Which team winning serves the league financially? Does extending a series benefit TV revenue? Which market is larger?
+
+2. STAR NARRATIVE — Is there a redemption arc, revenge game, milestone night, or debut story being pushed in media around any player or coach tonight?
+
+3. MARKET SIZE — Bigger market teams get favorable outcomes more often. Which team represents the larger TV market and fanbase?
+
+4. CHAMPIONSHIP DROUGHT — Teams with long drought narratives get elevated. How long since each team won?
+
+5. VILLAIN VS HERO — Which team is being framed as the villain or hero in current media narrative?
+
+6. COACH HOT SEAT — A coach on the hot seat often loses key games. Check for coaching pressure narratives.
+
+7. INJURY NARRATIVE — Is a star player returning from injury tonight? Return games are often scripted wins.
+
+8. SHARP MONEY ALIGNMENT — Does the public love one side heavily? Reverse line movement = sharps on other side = likely scripted outcome the public doesnt see coming.
+
+9. LEAGUE POLITICAL POWER — Which owner or franchise has more influence in the league office?
+
+10. NEXT ROUND MATCHUP — Which team winning creates the more marketable next round matchup?
+
+BETTING RULES:
+- 3+ narrative signals on same team: Triple Lock, bet 3-5 units
+- 2 signals: Double Lock, bet 2-3 units
+- 1 signal: Single Lock, bet 1 unit
+- No clear narrative: Skip
+- Consensus with Zach or AJ bot: Add 1 unit
+- Never exceed 3 units during validation phase
+
+End with:
+PICK: [Team]
+CONFIDENCE: [1-5 stars]
+UNITS: [0.5-3u]
+PRIMARY NARRATIVE: [The single strongest story driving this pick]`;
+
 const MODELS = [
   { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
   { value: "claude-opus-4-6", label: "Claude Opus 4" },
@@ -144,6 +182,9 @@ const defaults: GematriaSettings = {
   bot_c_system_prompt: AJ_WORDPLAY_PROMPT,
   bot_c_bet_rules: "",
   bot_c_model: "claude-sonnet-4-6",
+  bot_d_system_prompt: NARRATIVE_SCOUT_PROMPT,
+  bot_d_bet_rules: "",
+  bot_d_model: "claude-sonnet-4-6",
   max_units_per_bet: 5,
   max_daily_units: 20,
   unit_size: 100,
@@ -236,7 +277,7 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState<GematriaSettings>(defaults);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [activeBot, setActiveBot] = useState<"A" | "B" | "C">("A");
+  const [activeBot, setActiveBot] = useState<"A" | "B" | "C" | "D">("A");
 
   useEffect(() => {
     fetch("/api/settings")
@@ -247,6 +288,7 @@ export default function SettingsPage() {
             ...defaults,
             ...data,
             bot_c_system_prompt: data.bot_c_system_prompt || AJ_WORDPLAY_PROMPT,
+            bot_d_system_prompt: data.bot_d_system_prompt || NARRATIVE_SCOUT_PROMPT,
           });
         }
       })
@@ -319,6 +361,7 @@ export default function SettingsPage() {
 
   const isA = activeBot === "A";
   const isC = activeBot === "C";
+  const isD = activeBot === "D";
 
   return (
     <div className="min-h-screen">
@@ -357,6 +400,14 @@ export default function SettingsPage() {
               >
                 Bot C — AJ Wordplay
               </button>
+              <button
+                onClick={() => setActiveBot("D")}
+                className={`flex-1 py-1.5 px-3 rounded text-xs font-semibold tracking-wider uppercase transition-colors ${
+                  isD ? "bg-accent text-white" : "text-muted hover:text-text"
+                }`}
+              >
+                Bot D — Narrative Scout
+              </button>
             </div>
 
             {/* System prompt */}
@@ -369,11 +420,13 @@ export default function SettingsPage() {
                   ? settings.system_prompt
                   : isC
                     ? settings.bot_c_system_prompt
-                    : settings.bot_b_system_prompt
+                    : isD
+                      ? settings.bot_d_system_prompt
+                      : settings.bot_b_system_prompt
               }
               onChange={(e) =>
                 update(
-                  isA ? "system_prompt" : isC ? "bot_c_system_prompt" : "bot_b_system_prompt",
+                  isA ? "system_prompt" : isC ? "bot_c_system_prompt" : isD ? "bot_d_system_prompt" : "bot_b_system_prompt",
                   e.target.value
                 )
               }
@@ -384,7 +437,9 @@ export default function SettingsPage() {
                   ? "Custom instructions for Bot A…"
                   : isC
                     ? "Custom instructions for Bot C (AJ Wordplay)…"
-                    : "Custom instructions for Bot B (HUNGRY System)…"
+                    : isD
+                      ? "Custom instructions for Bot D (Narrative Scout)…"
+                      : "Custom instructions for Bot B (HUNGRY System)…"
               }
             />
 
@@ -398,11 +453,13 @@ export default function SettingsPage() {
                   ? settings.bet_rules
                   : isC
                     ? settings.bot_c_bet_rules
-                    : settings.bot_b_bet_rules
+                    : isD
+                      ? settings.bot_d_bet_rules
+                      : settings.bot_b_bet_rules
               }
               onChange={(e) =>
                 update(
-                  isA ? "bet_rules" : isC ? "bot_c_bet_rules" : "bot_b_bet_rules",
+                  isA ? "bet_rules" : isC ? "bot_c_bet_rules" : isD ? "bot_d_bet_rules" : "bot_b_bet_rules",
                   e.target.value
                 )
               }
@@ -413,7 +470,9 @@ export default function SettingsPage() {
                   ? "Betting rules for Bot A…"
                   : isC
                     ? "Betting rules for Bot C (AJ Wordplay)…"
-                    : "Betting rules for Bot B (HUNGRY System)…"
+                    : isD
+                      ? "Betting rules for Bot D (Narrative Scout)…"
+                      : "Betting rules for Bot B (HUNGRY System)…"
               }
             />
 
@@ -422,8 +481,8 @@ export default function SettingsPage() {
               AI Model
             </div>
             <ModelSelector
-              value={isA ? settings.model : isC ? settings.bot_c_model : settings.bot_b_model}
-              onChange={(v) => update(isA ? "model" : isC ? "bot_c_model" : "bot_b_model", v)}
+              value={isA ? settings.model : isC ? settings.bot_c_model : isD ? settings.bot_d_model : settings.bot_b_model}
+              onChange={(v) => update(isA ? "model" : isC ? "bot_c_model" : isD ? "bot_d_model" : "bot_b_model", v)}
             />
           </div>
 

@@ -84,7 +84,7 @@ export interface TradeDecision {
 export interface PaperTrade {
   id: string;
   game_id: string;
-  bot: "A" | "B" | "C";
+  bot: "A" | "B" | "C" | "D";
   bet_type: "moneyline" | "over_under";
   pick: string;
   picked_side: "home" | "away" | null;
@@ -136,6 +136,10 @@ export interface GematriaSettings {
   bot_c_system_prompt: string;
   bot_c_bet_rules: string;
   bot_c_model: string;
+  // Bot D (Narrative Scout)
+  bot_d_system_prompt: string;
+  bot_d_bet_rules: string;
+  bot_d_model: string;
   // Shared sizing / limits
   max_units_per_bet: number;
   max_daily_units: number;

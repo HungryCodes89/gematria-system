@@ -61,7 +61,7 @@ async function placeBots(
   game: Game,
   decisions: TradeDecision[],
   analysis: GameAnalysisResult,
-  bot: "A" | "B" | "C",
+  bot: "A" | "B" | "C" | "D",
   settings: GematriaSettings,
   state: { balance: number; dailyUnits: number; betsPlaced: number; gameIds: Set<string> }
 ): Promise<DecisionLog[]> {
@@ -154,11 +154,11 @@ export async function POST(req: NextRequest) {
   const today = getTodayET();
 
   // Parse request body — bot selector + optional single-game re-analyze
-  let botParam: "all" | "A" | "B" | "C" = "all";
+  let botParam: "all" | "A" | "B" | "C" | "D" = "all";
   let gameIdParam: string | null = null;
   try {
     const body = await req.json();
-    if (["all", "A", "B", "C"].includes(body?.bot)) botParam = body.bot;
+    if (["all", "A", "B", "C", "D"].includes(body?.bot)) botParam = body.bot;
     if (body?.gameId && typeof body.gameId === "string") gameIdParam = body.gameId;
   } catch { /* no body — use default */ }
 
@@ -186,10 +186,17 @@ export async function POST(req: NextRequest) {
     bet_rules: settings.bot_c_bet_rules || settings.bet_rules,
     model: settings.bot_c_model || settings.model,
   };
+  const botDSettings: GematriaSettings = {
+    ...settings,
+    system_prompt: settings.bot_d_system_prompt || settings.system_prompt,
+    bet_rules: settings.bot_d_bet_rules || settings.bet_rules,
+    model: settings.bot_d_model || settings.model,
+  };
 
   const runA = botParam === "all" || botParam === "A";
   const runB = (botParam === "all" || botParam === "B") && Boolean(settings.bot_b_system_prompt);
   const runC = (botParam === "all" || botParam === "C") && Boolean(settings.bot_c_system_prompt);
+  const runD = (botParam === "all" || botParam === "D") && Boolean(settings.bot_d_system_prompt);
 
   // Single-game re-analyze: reset analyzed flag so it gets re-processed
   if (gameIdParam) {
@@ -203,7 +210,7 @@ export async function POST(req: NextRequest) {
 
   const { data: games } = await gamesQuery;
   const unanalyzed: Game[] = (games ?? []) as Game[];
-  console.log(`[analyze] runA=${runA} runB=${runB} runC=${runC} games=${unanalyzed.length} bot=${botParam}`);
+  console.log(`[analyze] runA=${runA} runB=${runB} runC=${runC} runD=${runD} games=${unanalyzed.length} bot=${botParam}`);
 
   // Fetch today's decode notes once and inject into all bot prompts
   const { data: notesRow } = await supabase
@@ -239,7 +246,7 @@ export async function POST(req: NextRequest) {
   const balance = ledgerRow?.balance ?? settings.starting_bankroll;
 
   // Query each bot's daily trades — units for limit tracking, game_id for dedup
-  const [botARes, botBRes, botCRes] = await Promise.all([
+  const [botARes, botBRes, botCRes, botDRes] = await Promise.all([
     supabase
       .from("paper_trades")
       .select("units, game_id")
@@ -256,6 +263,12 @@ export async function POST(req: NextRequest) {
       .from("paper_trades")
       .select("units, game_id")
       .eq("bot", "C")
+      .gte("placed_at", `${today}T00:00:00`)
+      .lt("placed_at", `${today}T23:59:59.999`),
+    supabase
+      .from("paper_trades")
+      .select("units, game_id")
+      .eq("bot", "D")
       .gte("placed_at", `${today}T00:00:00`)
       .lt("placed_at", `${today}T23:59:59.999`),
   ]);
@@ -278,9 +291,16 @@ export async function POST(req: NextRequest) {
     betsPlaced: 0,
     gameIds: new Set<string>((botCRes.data ?? []).map((t: { game_id: string }) => t.game_id).filter(Boolean)),
   };
+  const botDState = {
+    balance,
+    dailyUnits: (botDRes.data ?? []).reduce((s: number, t: { units: number }) => s + (t.units ?? 0), 0),
+    betsPlaced: 0,
+    gameIds: new Set<string>((botDRes.data ?? []).map((t: { game_id: string }) => t.game_id).filter(Boolean)),
+  };
   console.log(`[analyze] Bot A today: ${botAState.dailyUnits}u, ${botAState.gameIds.size} games`);
   console.log(`[analyze] Bot B today: ${botBState.dailyUnits}u, ${botBState.gameIds.size} games`);
   console.log(`[analyze] Bot C today: ${botCState.dailyUnits}u, ${botCState.gameIds.size} games`);
+  console.log(`[analyze] Bot D today: ${botDState.dailyUnits}u, ${botDState.gameIds.size} games`);
 
   const total = unanalyzed.length;
   let analyzed = 0;
@@ -340,8 +360,21 @@ export async function POST(req: NextRequest) {
             console.log(`[analyze] Bot C skip — already bet game ${game.id}`);
           }
 
-          const primaryAnalysis = analysisA ?? analysisB ?? analysisC;
-          const anyBotRan = analysisA || analysisB || analysisC;
+          // --- Bot D (Narrative Scout) ---
+          let analysisD: GameAnalysisResult | null = null;
+          let logsD: DecisionLog[] = [];
+          const skipD = runD && botDState.gameIds.has(game.id);
+          if (runD && !skipD) {
+            console.log(`[analyze] Bot D analyzing ${game.away_team} @ ${game.home_team}`);
+            const { analysis, decisions } = await analyzeGameWithClaude(game, botDSettings, "D", todayNotes, matchedPatterns);
+            analysisD = analysis;
+            logsD = await placeBots(supabase, game, decisions, analysis, "D", settings, botDState);
+          } else if (skipD) {
+            console.log(`[analyze] Bot D skip — already bet game ${game.id}`);
+          }
+
+          const primaryAnalysis = analysisA ?? analysisB ?? analysisC ?? analysisD;
+          const anyBotRan = analysisA || analysisB || analysisC || analysisD;
 
           // Only update game metadata when at least one bot ran (avoid overwriting with nulls)
           if (anyBotRan) {
@@ -366,10 +399,12 @@ export async function POST(req: NextRequest) {
               confidence: primaryAnalysis?.confidence,
               botB: runB ? { lockType: analysisB?.lockType, confidence: analysisB?.confidence } : null,
               botC: runC ? { lockType: analysisC?.lockType, confidence: analysisC?.confidence } : null,
+              botD: runD ? { lockType: analysisD?.lockType, confidence: analysisD?.confidence } : null,
               decisionLogs: {
                 A: runA ? logsA : null,
                 B: runB ? logsB : null,
                 C: runC ? logsC : null,
+                D: runD ? logsD : null,
               },
             })
           );
@@ -389,13 +424,14 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      const totalBets = botAState.betsPlaced + botBState.betsPlaced + botCState.betsPlaced;
+      const totalBets = botAState.betsPlaced + botBState.betsPlaced + botCState.betsPlaced + botDState.betsPlaced;
       // Only include balances from bots that actually ran — disabled bots retain the
       // full starting balance and would otherwise corrupt the Math.min result.
       const activeBalances = [
         runA ? botAState.balance : null,
         runB ? botBState.balance : null,
         runC ? botCState.balance : null,
+        runD ? botDState.balance : null,
       ].filter((b): b is number => b !== null);
       const lowestBalance = activeBalances.length > 0 ? Math.min(...activeBalances) : balance;
 
@@ -419,6 +455,7 @@ export async function POST(req: NextRequest) {
           botA: { bets: botAState.betsPlaced, enabled: runA },
           botB: { bets: botBState.betsPlaced, enabled: runB },
           botC: { bets: botCState.betsPlaced, enabled: runC },
+          botD: { bets: botDState.betsPlaced, enabled: runD },
           errors,
           settingsSnapshot: {
             model: settings.model,

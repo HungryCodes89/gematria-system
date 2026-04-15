@@ -13,12 +13,14 @@ const BOT_LABELS: Record<string, string> = {
   A: "Bot A — Basic",
   B: "Bot B — HUNGRY",
   C: "Bot C — AJ",
+  D: "Bot D — Narrative",
 };
 
 const BOT_COLORS: Record<string, string> = {
   A: "bg-zinc-700/50 text-zinc-300",
   B: "bg-accent/20 text-accent",
   C: "bg-purple-500/20 text-purple-400",
+  D: "bg-orange-500/20 text-orange-400",
 };
 
 const LOCK_CONFIG: Record<string, { label: string; color: string; Icon: typeof Shield }> = {
