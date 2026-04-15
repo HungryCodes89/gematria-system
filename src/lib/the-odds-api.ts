@@ -1,6 +1,6 @@
 // The Odds API v4 integration — live sportsbook lines for NBA/NHL/MLB
 
-const ODDS_API_BASE = 'https://api.the-odds-api.com/v4'
+const ODDS_API_BASE = 'https://api.theoddsapi.com/v4'
 
 const SPORT_KEYS: Record<string, string> = {
   NBA: 'basketball_nba',
