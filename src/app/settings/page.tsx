@@ -129,7 +129,7 @@ PRIMARY SIGNAL: [Single strongest AJ-style connection]
 WORDPLAY NOTE: [Most interesting linguistic/symbolic observation]`;
 
 const MODELS = [
-  { value: "claude-sonnet-4-20250514", label: "Claude Sonnet 4" },
+  { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
   { value: "claude-opus-4-6", label: "Claude Opus 4" },
   { value: "claude-haiku-4-20250414", label: "Claude Haiku 4" },
 ];
@@ -137,13 +137,13 @@ const MODELS = [
 const defaults: GematriaSettings = {
   system_prompt: "",
   bet_rules: "",
-  model: "claude-sonnet-4-20250514",
+  model: "claude-sonnet-4-6",
   bot_b_system_prompt: "",
   bot_b_bet_rules: "",
-  bot_b_model: "claude-sonnet-4-20250514",
+  bot_b_model: "claude-sonnet-4-6",
   bot_c_system_prompt: AJ_WORDPLAY_PROMPT,
   bot_c_bet_rules: "",
-  bot_c_model: "claude-sonnet-4-20250514",
+  bot_c_model: "claude-sonnet-4-6",
   max_units_per_bet: 5,
   max_daily_units: 20,
   unit_size: 100,

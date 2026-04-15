@@ -120,7 +120,7 @@ export async function GET() {
   if (settings) {
     const modelOk =
       settings.model?.startsWith("claude-") &&
-      !settings.model.includes("claude-sonnet-4-20250514") &&
+      !settings.model.includes("claude-sonnet-4-5") &&
       !settings.model.includes("claude-3-");
     if (!modelOk) {
       knownIssues.push(
