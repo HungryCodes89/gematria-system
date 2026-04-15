@@ -195,23 +195,27 @@ Short Year: ${dn.shortYear} | Month+Day: ${dn.monthDay}
 Root Number: ${dn.rootNumber} | Calendar Day: ${dn.calendarDay} | Calendar Month: ${dn.calendarMonth}${bot === "C" ? `\nDay of Year: ${dn.dayOfYear} | Days Remaining: ${dn.daysRemaining}` : ""}`
   );
 
-  sections.push(
-    `=== HOME TEAM CIPHERS (${game.home_team}) ===
+  // Bot D (Narrative Scout) works from game context only — cipher values are
+  // irrelevant noise for a narrative-based methodology.
+  if (bot !== "D") {
+    sections.push(
+      `=== HOME TEAM CIPHERS (${game.home_team}) ===
 ${formatCipherValues(analysis.homeGematria)}`
-  );
-  sections.push(
-    `=== HOME TEAM ALIGNMENTS ===
+    );
+    sections.push(
+      `=== HOME TEAM ALIGNMENTS ===
 ${formatAlignments(analysis.homeAlignments)}`
-  );
+    );
 
-  sections.push(
-    `=== AWAY TEAM CIPHERS (${game.away_team}) ===
+    sections.push(
+      `=== AWAY TEAM CIPHERS (${game.away_team}) ===
 ${formatCipherValues(analysis.awayGematria)}`
-  );
-  sections.push(
-    `=== AWAY TEAM ALIGNMENTS ===
+    );
+    sections.push(
+      `=== AWAY TEAM ALIGNMENTS ===
 ${formatAlignments(analysis.awayAlignments)}`
-  );
+    );
+  }
 
   const lockLabel =
     analysis.lockType === "triple"
@@ -222,13 +226,14 @@ ${formatAlignments(analysis.awayAlignments)}`
           ? "SINGLE LOCK"
           : "SKIP";
 
+  // Only Bot A gets the engine's Favored Side — other bots must reach their own
+  // conclusion using their own methodology, not be anchored by the gematria pick.
   sections.push(
-    `=== GEMATRIA SUMMARY ===
+    `=== GEMATRIA ENGINE SUMMARY ===
 Lock Type: ${lockLabel}
 Home Alignments: ${analysis.homeAlignments.length}
 Away Alignments: ${analysis.awayAlignments.length}
-Confidence: ${analysis.gematriaConfidence}%
-Favored Side: ${analysis.pickedSide === "skip" ? "Neither" : analysis.pickedSide}`
+Confidence: ${analysis.gematriaConfidence}%${bot === "A" ? `\nFavored Side: ${analysis.pickedSide === "skip" ? "Neither" : analysis.pickedSide}` : ""}`
   );
 
   sections.push(`=== ODDS ===\n${formatOdds(game.polymarket_odds)}`);

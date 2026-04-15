@@ -22,6 +22,15 @@ const AUTO_BET_MAP: Record<LockType, keyof GematriaSettings | null> = {
   no_lock: null,
 };
 
+// Bots B/C/D use their own confidence to determine lock type — they are not
+// gated by the gematria engine so each bot can bet on different games.
+function confidenceToLockType(confidence: number): LockType {
+  if (confidence >= 75) return "triple_lock";
+  if (confidence >= 60) return "double_lock";
+  if (confidence >= 55) return "single_lock";
+  return "no_lock";
+}
+
 function sse(data: unknown): string {
   return `data: ${JSON.stringify(data)}\n\n`;
 }
@@ -83,13 +92,20 @@ async function placeBots(
       continue;
     }
 
-    const autoBetKey = AUTO_BET_MAP[analysis.lockType];
+    // Bot A is gated by the gematria engine lock type.
+    // Bots B/C/D derive their own lock type from Claude's confidence so each
+    // bot independently decides which games to bet — they won't all pick the same games.
+    const effectiveLockType = bot === "A"
+      ? analysis.lockType
+      : confidenceToLockType(decision.confidence);
+
+    const autoBetKey = AUTO_BET_MAP[effectiveLockType];
     if (!autoBetKey) {
-      logs.push({ ...base, placed: false, skipReason: `Engine: ${analysis.lockType} — no auto-bet for no_lock` });
+      logs.push({ ...base, placed: false, skipReason: `${bot === "A" ? "Engine" : "Claude"}: ${effectiveLockType} — no auto-bet for no_lock` });
       continue;
     }
     if (!settings[autoBetKey]) {
-      logs.push({ ...base, placed: false, skipReason: `Auto-bet disabled for ${analysis.lockType} (settings.${autoBetKey}=false)` });
+      logs.push({ ...base, placed: false, skipReason: `Auto-bet disabled for ${effectiveLockType} (settings.${autoBetKey}=false)` });
       continue;
     }
     if (decision.confidence < settings.min_confidence) {
@@ -126,7 +142,7 @@ async function placeBots(
         result: "pending",
         profit_loss: 0,
         confidence: decision.confidence,
-        lock_type: analysis.lockType,
+        lock_type: effectiveLockType,
         reasoning: decision.reasoning,
         opening_line: extractOpeningLine(game, decision.betType, decision.pickedSide),
         strategy_version: "v1",
