@@ -51,7 +51,7 @@ export async function GET() {
   const leagues = [
     ...new Set(
       trades.flatMap((t) => {
-        const g = t.game as { league: string } | null;
+        const g = t.game as unknown as { league: string } | null;
         return g ? [g.league] : [];
       })
     ),
@@ -70,7 +70,7 @@ export async function GET() {
   const updates: Update[] = [];
 
   for (const trade of trades) {
-    const game = trade.game as {
+    const game = trade.game as unknown as {
       league: string;
       home_team: string;
       away_team: string;
