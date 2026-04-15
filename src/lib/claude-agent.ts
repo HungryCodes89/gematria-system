@@ -169,10 +169,33 @@ function formatOdds(odds: ConsolidatedOdds | null): string {
 }
 
 function buildUserMessage(game: Game, analysis: GameAnalysis, bot?: "A" | "B" | "C" | "D", notes?: string, matchedPatterns?: MatchedPattern[]): string {
-  const dn = analysis.dateNumerology;
   const moonIll = getMoonIllumination(new Date(game.game_date + "T17:00:00Z"));
   const fullMoon = isFullMoon(game.game_date);
 
+  // ── Bot D (Narrative Scout) ──────────────────────────────────────────────
+  // Receives ONLY: team names, league, date, start time, venue, records, odds.
+  // No gematria numbers of any kind — no ciphers, no numerology, no alignment
+  // counts, no lock type, no pattern cipher values. Bot D derives everything
+  // from its own narrative/market/political methodology.
+  if (bot === "D") {
+    const sections: string[] = [];
+    if (notes?.trim()) {
+      sections.push(`=== DECODE JOURNAL (Sean's Notes) ===\n${notes.trim()}`);
+    }
+    sections.push(
+      `=== GAME ===
+${game.away_team} @ ${game.home_team}
+League: ${game.league} | Date: ${game.game_date}${game.start_time ? ` | Time: ${game.start_time}` : ""}
+Venue: ${analysis.venue}
+Records: Home ${game.home_record ?? "N/A"} | Away ${game.away_record ?? "N/A"}
+Moon: ${(moonIll * 100).toFixed(0)}% illumination${fullMoon ? " (FULL MOON)" : ""}`
+    );
+    sections.push(`=== ODDS ===\n${formatOdds(game.polymarket_odds)}`);
+    return sections.join("\n\n");
+  }
+
+  // ── Bots A / B / C ───────────────────────────────────────────────────────
+  const dn = analysis.dateNumerology;
   const sections: string[] = [];
 
   if (notes?.trim()) {
@@ -195,27 +218,23 @@ Short Year: ${dn.shortYear} | Month+Day: ${dn.monthDay}
 Root Number: ${dn.rootNumber} | Calendar Day: ${dn.calendarDay} | Calendar Month: ${dn.calendarMonth}${bot === "C" ? `\nDay of Year: ${dn.dayOfYear} | Days Remaining: ${dn.daysRemaining}` : ""}`
   );
 
-  // Bot D (Narrative Scout) works from game context only — cipher values are
-  // irrelevant noise for a narrative-based methodology.
-  if (bot !== "D") {
-    sections.push(
-      `=== HOME TEAM CIPHERS (${game.home_team}) ===
+  sections.push(
+    `=== HOME TEAM CIPHERS (${game.home_team}) ===
 ${formatCipherValues(analysis.homeGematria)}`
-    );
-    sections.push(
-      `=== HOME TEAM ALIGNMENTS ===
+  );
+  sections.push(
+    `=== HOME TEAM ALIGNMENTS ===
 ${formatAlignments(analysis.homeAlignments)}`
-    );
+  );
 
-    sections.push(
-      `=== AWAY TEAM CIPHERS (${game.away_team}) ===
+  sections.push(
+    `=== AWAY TEAM CIPHERS (${game.away_team}) ===
 ${formatCipherValues(analysis.awayGematria)}`
-    );
-    sections.push(
-      `=== AWAY TEAM ALIGNMENTS ===
+  );
+  sections.push(
+    `=== AWAY TEAM ALIGNMENTS ===
 ${formatAlignments(analysis.awayAlignments)}`
-    );
-  }
+  );
 
   const lockLabel =
     analysis.lockType === "triple"
@@ -226,8 +245,8 @@ ${formatAlignments(analysis.awayAlignments)}`
           ? "SINGLE LOCK"
           : "SKIP";
 
-  // Only Bot A gets the engine's Favored Side — other bots must reach their own
-  // conclusion using their own methodology, not be anchored by the gematria pick.
+  // Only Bot A gets the engine's Favored Side — B/C must reach their own
+  // conclusion from their own methodology, not be anchored by the engine's pick.
   sections.push(
     `=== GEMATRIA ENGINE SUMMARY ===
 Lock Type: ${lockLabel}
