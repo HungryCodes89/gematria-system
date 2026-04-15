@@ -4,7 +4,7 @@ const ODDS_API_BASE = 'https://api.the-odds-api.com/v4'
 
 const SPORT_KEYS: Record<string, string> = {
   NBA: 'basketball_nba',
-  NHL: 'ice_hockey_nhl',
+  NHL: 'icehockey_nhl',
   MLB: 'baseball_mlb',
 }
 
