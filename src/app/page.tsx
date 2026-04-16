@@ -23,6 +23,7 @@ import GameCard from "@/components/GameCard";
 import StatCard from "@/components/StatCard";
 import ManualPickModal from "@/components/ManualPickModal";
 import GameDetailModal from "@/components/GameDetailModal";
+import BriefingModal from "@/components/BriefingModal";
 
 type League = "ALL" | "NBA" | "NHL" | "MLB";
 type BotSelection = "all" | "A" | "B" | "C" | "D";
@@ -56,6 +57,7 @@ export default function Dashboard() {
     losses: number | null;
     dailyPL: number | null;
   } | null>(null);
+  const [showBriefingModal, setShowBriefingModal] = useState(false);
   const [reanalyzingId, setReanalyzingId] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
   const [notesSaving, setNotesSaving] = useState(false);
@@ -360,7 +362,7 @@ export default function Dashboard() {
         </div>
 
         {/* Action buttons */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-4">
           <button
             onClick={handleFetch}
             disabled={loading !== null}
@@ -400,6 +402,13 @@ export default function Dashboard() {
           >
             <PenLine size={16} />
             <span className="text-sm font-medium">Log Pick</span>
+          </button>
+          <button
+            onClick={() => setShowBriefingModal(true)}
+            className="card flex items-center justify-center gap-2 py-3 border-purple-500/30 hover:bg-purple-500/10 transition-colors cursor-pointer"
+          >
+            <BookOpen size={16} className="text-purple-400" />
+            <span className="text-sm font-medium">Briefing</span>
           </button>
         </div>
 
@@ -589,6 +598,10 @@ export default function Dashboard() {
           game={selectedGame}
           onClose={() => setSelectedGame(null)}
         />
+      )}
+
+      {showBriefingModal && (
+        <BriefingModal onClose={() => setShowBriefingModal(false)} />
       )}
 
     </div>
