@@ -26,6 +26,9 @@ export type SignalName =
   | 'name_match'
   | 'venue_match'
   | 'narrative_push'
+  | 'sharp_home_action'
+  | 'sharp_away_action'
+  | 'sharp_ou_action'
 
 export interface TradeSignalData {
   lock_type: string | null
@@ -137,6 +140,34 @@ export function extractSignals(trade: TradeSignalData): SignalName[] {
     signals.add('narrative_push')
   }
 
+  if (
+    r.includes('sharp home') ||
+    r.includes('sharp action home') ||
+    r.includes('pinnacle home') ||
+    (r.includes('sharp') && r.includes('home team'))
+  ) {
+    signals.add('sharp_home_action')
+  }
+
+  if (
+    r.includes('sharp away') ||
+    r.includes('sharp action away') ||
+    r.includes('pinnacle away') ||
+    (r.includes('sharp') && r.includes('away team'))
+  ) {
+    signals.add('sharp_away_action')
+  }
+
+  if (
+    r.includes('sharp over') ||
+    r.includes('sharp under') ||
+    r.includes('sharp ou') ||
+    r.includes('sharp total') ||
+    (r.includes('sharp') && (r.includes(' over ') || r.includes(' under ')))
+  ) {
+    signals.add('sharp_ou_action')
+  }
+
   return [...signals]
 }
 
@@ -223,4 +254,7 @@ export const SIGNAL_LABELS: Record<SignalName, string> = {
   name_match: 'Name/City Match',
   venue_match: 'Venue Match',
   narrative_push: 'Narrative Push',
+  sharp_home_action: 'Sharp Home Action',
+  sharp_away_action: 'Sharp Away Action',
+  sharp_ou_action: 'Sharp O/U Action',
 }

@@ -222,6 +222,45 @@ In your JSON response:
 Set confidence based on the strength of the sacrifice evidence above.`;
 }
 
+function formatSharpMoneySection(odds: ConsolidatedOdds | null, homeTeam: string, awayTeam: string): string | null {
+  if (!odds) return null
+  const { sharpHome, sharpAway, sharpOU, pinnacleImpliedHome, pinnacleImpliedAway,
+    dkImpliedHome, dkImpliedAway, mlGapHome, mlGapAway, ouGap, pinnacleOverUnderLine } = odds
+
+  const hasSharp = sharpHome || sharpAway || sharpOU
+  if (!hasSharp) return null
+
+  const lines: string[] = []
+
+  const pct = (n: number | null | undefined) => n != null ? `${(n * 100).toFixed(1)}%` : 'N/A'
+
+  if (sharpHome && mlGapHome != null) {
+    lines.push(
+      `  ⚡ SHARP HOME (${homeTeam}): Pinnacle ${pct(pinnacleImpliedHome)} vs DraftKings ${pct(dkImpliedHome)} — gap +${(mlGapHome * 100).toFixed(1)}%`
+    )
+  }
+
+  if (sharpAway && mlGapAway != null) {
+    lines.push(
+      `  ⚡ SHARP AWAY (${awayTeam}): Pinnacle ${pct(pinnacleImpliedAway)} vs DraftKings ${pct(dkImpliedAway)} — gap +${(mlGapAway * 100).toFixed(1)}%`
+    )
+  }
+
+  if (sharpOU && ouGap != null && pinnacleOverUnderLine != null) {
+    const dkOU = Math.round((pinnacleOverUnderLine - ouGap) * 10) / 10
+    lines.push(
+      `  ⚡ SHARP ${sharpOU.toUpperCase()}: Pinnacle O/U ${pinnacleOverUnderLine} vs DraftKings ${dkOU} — gap ${ouGap > 0 ? '+' : ''}${ouGap}`
+    )
+  }
+
+  return `=== SHARP MONEY INDICATOR ===
+Pinnacle (sharp/professional book) differs significantly from DraftKings (public/recreational book).
+A meaningful gap indicates sophisticated bettors have moved the Pinnacle line — treat this as informed market signal.
+${lines.join('\n')}
+
+Factor sharp action into your narrative and market analysis when deciding side and sizing.`
+}
+
 function formatProvenPatterns(patterns: ProvenPattern[]): string {
   const lines = patterns.map((p) => {
     const winPct = Math.round(p.win_rate * 100);
@@ -266,6 +305,8 @@ Records: Home ${game.home_record ?? "N/A"} | Away ${game.away_record ?? "N/A"}
 Moon: ${(moonIll * 100).toFixed(0)}% illumination${fullMoon ? " (FULL MOON)" : ""}`
     );
     sections.push(`=== ODDS ===\n${formatOdds(game.polymarket_odds)}`);
+    const sharpSection = formatSharpMoneySection(game.polymarket_odds, game.home_team, game.away_team);
+    if (sharpSection) sections.push(sharpSection);
     if (provenPatterns && provenPatterns.length > 0) {
       sections.push(formatProvenPatterns(provenPatterns));
     }

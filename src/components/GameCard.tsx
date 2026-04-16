@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { RefreshCw, ChevronDown, ChevronUp } from "lucide-react";
+import { RefreshCw, ChevronDown, ChevronUp, Zap } from "lucide-react";
 import type { Game, PaperTrade, BookOddsLine } from "@/lib/types";
 import LockBadge from "./LockBadge";
 
@@ -135,6 +135,17 @@ export default function GameCard({
   const hasBooks =
     odds?.books != null && Object.keys(odds.books).length > 0;
 
+  const sharpSide = odds?.sharpHome
+    ? game.home_team.split(" ").pop()
+    : odds?.sharpAway
+      ? game.away_team.split(" ").pop()
+      : null;
+  const sharpLabel = sharpSide
+    ? `SHARP ${sharpSide}`
+    : odds?.sharpOU
+      ? `SHARP ${odds.sharpOU.toUpperCase()}`
+      : null;
+
   return (
     <div
       onClick={onClick}
@@ -153,6 +164,15 @@ export default function GameCard({
           {game.is_primetime && (
             <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-400">
               PT
+            </span>
+          )}
+          {sharpLabel && (
+            <span
+              title={`Sharp action detected: Pinnacle vs DraftKings line gap exceeds threshold`}
+              className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400 flex items-center gap-0.5"
+            >
+              <Zap size={8} />
+              {sharpLabel}
             </span>
           )}
         </div>

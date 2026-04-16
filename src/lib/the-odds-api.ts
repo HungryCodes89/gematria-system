@@ -169,6 +169,78 @@ function lastWord(s: string): string {
   return (words[words.length - 1] ?? '').toLowerCase().replace(/[^a-z]/g, '')
 }
 
+// ---------------------------------------------------------------------------
+// Sharp money detection
+// ---------------------------------------------------------------------------
+
+export interface SharpData {
+  sharpHome: boolean
+  sharpAway: boolean
+  sharpOU: 'over' | 'under' | null
+  pinnacleImpliedHome: number | null
+  pinnacleImpliedAway: number | null
+  dkImpliedHome: number | null
+  dkImpliedAway: number | null
+  /** Pinnacle implied prob minus DraftKings implied prob; positive = sharp on that side */
+  mlGapHome: number | null
+  mlGapAway: number | null
+  /** Pinnacle O/U minus DraftKings O/U; positive = sharp over */
+  ouGap: number | null
+}
+
+function americanToImplied(odds: number): number {
+  if (odds > 0) return 100 / (odds + 100)
+  return (-odds) / (-odds + 100)
+}
+
+/** 3% implied probability gap between Pinnacle and DraftKings triggers SHARP flag */
+const SHARP_ML_THRESHOLD = 0.03
+
+/**
+ * Compare Pinnacle (sharp reference) vs DraftKings (public book) lines.
+ * Returns null if either book is missing.
+ */
+export function calculateSharpData(
+  pinnacle: BookOddsLine | null,
+  dk: BookOddsLine | null,
+): SharpData | null {
+  if (!pinnacle || !dk) return null
+
+  const pinHome = pinnacle.moneylineHome != null ? americanToImplied(pinnacle.moneylineHome) : null
+  const pinAway = pinnacle.moneylineAway != null ? americanToImplied(pinnacle.moneylineAway) : null
+  const dkHome = dk.moneylineHome != null ? americanToImplied(dk.moneylineHome) : null
+  const dkAway = dk.moneylineAway != null ? americanToImplied(dk.moneylineAway) : null
+
+  const mlGapHome = pinHome != null && dkHome != null ? pinHome - dkHome : null
+  const mlGapAway = pinAway != null && dkAway != null ? pinAway - dkAway : null
+
+  const sharpHome = mlGapHome != null && mlGapHome > SHARP_ML_THRESHOLD
+  const sharpAway = mlGapAway != null && mlGapAway > SHARP_ML_THRESHOLD
+
+  const ouGap =
+    pinnacle.overUnderLine != null && dk.overUnderLine != null
+      ? pinnacle.overUnderLine - dk.overUnderLine
+      : null
+  const sharpOU: 'over' | 'under' | null =
+    ouGap != null ? (ouGap > 0.5 ? 'over' : ouGap < -0.5 ? 'under' : null) : null
+
+  const r3 = (n: number | null) => (n != null ? Math.round(n * 1000) / 1000 : null)
+  const r1 = (n: number | null) => (n != null ? Math.round(n * 10) / 10 : null)
+
+  return {
+    sharpHome,
+    sharpAway,
+    sharpOU,
+    pinnacleImpliedHome: r3(pinHome),
+    pinnacleImpliedAway: r3(pinAway),
+    dkImpliedHome: r3(dkHome),
+    dkImpliedAway: r3(dkAway),
+    mlGapHome: r3(mlGapHome),
+    mlGapAway: r3(mlGapAway),
+    ouGap: r1(ouGap),
+  }
+}
+
 /** Fuzzy match an OddsApi game to DB home/away team names */
 export function matchOddsApiGame(
   oddsGames: OddsApiGame[],

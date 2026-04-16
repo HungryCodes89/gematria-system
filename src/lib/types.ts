@@ -61,6 +61,17 @@ export interface ConsolidatedOdds {
   pinnacleMoneylineHome?: number | null;
   pinnacleMoneylineAway?: number | null;
   pinnacleOverUnderLine?: number | null;
+  // Sharp money indicator (Pinnacle vs DraftKings)
+  sharpHome?: boolean | null;
+  sharpAway?: boolean | null;
+  sharpOU?: 'over' | 'under' | null;
+  pinnacleImpliedHome?: number | null;
+  pinnacleImpliedAway?: number | null;
+  dkImpliedHome?: number | null;
+  dkImpliedAway?: number | null;
+  mlGapHome?: number | null;
+  mlGapAway?: number | null;
+  ouGap?: number | null;
 }
 
 // ── Trade Decision (Claude output) ──

@@ -3,7 +3,7 @@ import { getTodayET } from '@/lib/date-utils'
 import { fetchNBAGames, fetchNHLGames, fetchMLBGames } from '@/lib/sports-api'
 import type { ESPNGame, NHLGame } from '@/lib/sports-api'
 import { fetchPolymarketOdds, filterSnapshotsForGame, consolidateOdds } from '@/lib/odds-api'
-import { fetchOddsForLeague, matchOddsApiGame } from '@/lib/the-odds-api'
+import { fetchOddsForLeague, matchOddsApiGame, calculateSharpData } from '@/lib/the-odds-api'
 import { isFullMoon } from '@/lib/moon-phase'
 import { getSupabaseAdmin } from '@/lib/supabase-server'
 
@@ -158,6 +158,8 @@ export async function POST() {
       if (!consolidated && !apiMatch) continue
 
       const pinnacle = apiMatch?.books['Pinnacle'] ?? null
+      const dk = apiMatch?.books['DraftKings'] ?? null
+      const sharpData = calculateSharpData(pinnacle, dk)
 
       const oddsJson = {
         // Polymarket base lines (fallback to Pinnacle if polymarket missed)
@@ -184,6 +186,17 @@ export async function POST() {
         pinnacleMoneylineHome: pinnacle?.moneylineHome ?? null,
         pinnacleMoneylineAway: pinnacle?.moneylineAway ?? null,
         pinnacleOverUnderLine: pinnacle?.overUnderLine ?? null,
+        // Sharp money indicator (Pinnacle vs DraftKings line comparison)
+        sharpHome: sharpData?.sharpHome ?? null,
+        sharpAway: sharpData?.sharpAway ?? null,
+        sharpOU: sharpData?.sharpOU ?? null,
+        pinnacleImpliedHome: sharpData?.pinnacleImpliedHome ?? null,
+        pinnacleImpliedAway: sharpData?.pinnacleImpliedAway ?? null,
+        dkImpliedHome: sharpData?.dkImpliedHome ?? null,
+        dkImpliedAway: sharpData?.dkImpliedAway ?? null,
+        mlGapHome: sharpData?.mlGapHome ?? null,
+        mlGapAway: sharpData?.mlGapAway ?? null,
+        ouGap: sharpData?.ouGap ?? null,
       }
 
       const { error: oddsErr } = await sb
