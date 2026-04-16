@@ -2,12 +2,18 @@
   "functions": {
     "src/app/api/analyze/route.ts": { "maxDuration": 300 },
     "src/app/api/settle/route.ts": { "maxDuration": 60 },
+    "src/app/api/cron/auto-settle/route.ts": { "maxDuration": 60 },
+    "src/app/api/cron/snapshot-lines/route.ts": { "maxDuration": 30 },
     "src/app/api/fetch-games/route.ts": { "maxDuration": 60 }
   },
   "crons": [
     {
-      "path": "/api/settle",
-      "schedule": "*/30 * * * *"
+      "path": "/api/cron/snapshot-lines",
+      "schedule": "30 22 * * *"
+    },
+    {
+      "path": "/api/cron/auto-settle",
+      "schedule": "0 6 * * *"
     }
   ]
 }

@@ -49,6 +49,13 @@ export default function Dashboard() {
   } | null>(null);
   const [showManualModal, setShowManualModal] = useState(false);
   const [selectedGame, setSelectedGame] = useState<Game | null>(null);
+  const [lastSettlement, setLastSettlement] = useState<{
+    settledAt: string;
+    betsPlaced: number | null;
+    wins: number | null;
+    losses: number | null;
+    dailyPL: number | null;
+  } | null>(null);
   const [reanalyzingId, setReanalyzingId] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
   const [notesSaving, setNotesSaving] = useState(false);
@@ -77,6 +84,7 @@ export default function Dashboard() {
       if (res.ok) {
         const data = await res.json();
         setTrades(data.trades || []);
+        if (data.lastSettlement) setLastSettlement(data.lastSettlement);
       }
     } catch { /* ignore */ }
 
@@ -397,6 +405,32 @@ export default function Dashboard() {
 
         {statusMsg && (
           <div className="text-sm text-muted mb-4 text-center">{statusMsg}</div>
+        )}
+
+        {lastSettlement && (
+          <div className="text-[10px] text-muted mb-4 text-center">
+            Last auto-settlement:{" "}
+            <span className="text-text">
+              {new Date(lastSettlement.settledAt).toLocaleString("en-US", {
+                month: "short", day: "numeric",
+                hour: "numeric", minute: "2-digit", hour12: true,
+              })}
+            </span>
+            {lastSettlement.betsPlaced != null && lastSettlement.betsPlaced > 0 && (
+              <>
+                {" · "}
+                <span className="text-success">{lastSettlement.wins}W</span>
+                {"-"}
+                <span className="text-danger">{lastSettlement.losses}L</span>
+                {" · P&L: "}
+                <span className={lastSettlement.dailyPL != null && lastSettlement.dailyPL >= 0 ? "text-success" : "text-danger"}>
+                  {lastSettlement.dailyPL != null
+                    ? `${lastSettlement.dailyPL >= 0 ? "+" : ""}$${lastSettlement.dailyPL.toFixed(0)}`
+                    : "—"}
+                </span>
+              </>
+            )}
+          </div>
         )}
 
         {/* Bot selector */}
