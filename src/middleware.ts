@@ -4,10 +4,12 @@ import { verifySessionToken, COOKIE_NAME } from "@/lib/auth";
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // Allow login page and login API through without a session
+  // Allow login page, login API, and internal cron routes through without a session
   if (
     pathname === "/login" ||
-    pathname.startsWith("/api/auth/login")
+    pathname.startsWith("/api/auth/login") ||
+    pathname.startsWith("/api/cron/") ||
+    pathname.startsWith("/api/settle")
   ) {
     return NextResponse.next();
   }
