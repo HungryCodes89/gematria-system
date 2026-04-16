@@ -1,6 +1,6 @@
 // The Odds API v4 integration — live sportsbook lines for NBA/NHL/MLB
 
-const ODDS_API_BASE = 'https://api.theoddsapi.com/v4'
+const ODDS_API_BASE = 'https://api.the-odds-api.com/v4'
 
 const SPORT_KEYS: Record<string, string> = {
   NBA: 'basketball_nba',
@@ -46,9 +46,9 @@ export interface OddsApiGame {
 }
 
 export async function fetchOddsForLeague(league: string): Promise<OddsApiGame[]> {
-  const apiKey = process.env.ODDS_API_KEY
+  const apiKey = process.env.THE_ODDS_API_KEY
   if (!apiKey) {
-    console.warn('[odds-api] ODDS_API_KEY not set — skipping')
+    console.warn('[odds-api] THE_ODDS_API_KEY not set — skipping')
     return []
   }
 
@@ -57,7 +57,6 @@ export async function fetchOddsForLeague(league: string): Promise<OddsApiGame[]>
 
   try {
     const params = new URLSearchParams({
-      apiKey,
       regions: 'us',
       markets: 'h2h,totals',
       bookmakers: BOOK_KEYS.join(','),
@@ -65,6 +64,7 @@ export async function fetchOddsForLeague(league: string): Promise<OddsApiGame[]>
 
     const res = await fetch(`${ODDS_API_BASE}/sports/${sportKey}/odds/?${params}`, {
       cache: 'no-store',
+      headers: { 'x-api-key': apiKey },
     })
 
     if (!res.ok) {

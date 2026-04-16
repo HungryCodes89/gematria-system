@@ -23,7 +23,6 @@ import GameCard from "@/components/GameCard";
 import StatCard from "@/components/StatCard";
 import ManualPickModal from "@/components/ManualPickModal";
 import GameDetailModal from "@/components/GameDetailModal";
-import SettleModal from "@/components/SettleModal";
 
 type League = "ALL" | "NBA" | "NHL" | "MLB";
 type BotSelection = "all" | "A" | "B" | "C" | "D";
@@ -49,7 +48,6 @@ export default function Dashboard() {
     label: string;
   } | null>(null);
   const [showManualModal, setShowManualModal] = useState(false);
-  const [showSettleModal, setShowSettleModal] = useState(false);
   const [selectedGame, setSelectedGame] = useState<Game | null>(null);
   const [reanalyzingId, setReanalyzingId] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
@@ -273,10 +271,26 @@ export default function Dashboard() {
     }
   }
 
-  function handleSettled({ settled, wins, losses, dailyPL }: { settled: number; wins: number; losses: number; dailyPL: number }) {
-    setStatusMsg(`Settled ${settled} bets (${wins}W-${losses}L). P&L: $${dailyPL}`);
-    toast.success(`Settled ${settled} bets`);
-    loadGames();
+  async function handleSettle() {
+    setLoading("settle");
+    setStatusMsg("");
+    try {
+      const res = await fetch("/api/settle", { method: "POST" });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "Settlement failed");
+      if (data.settled === 0) {
+        toast.info("No final games to settle yet");
+      } else {
+        const { wins, losses } = data.results ?? {};
+        toast.success(`Settled ${data.settled} bet${data.settled !== 1 ? "s" : ""} (${wins}W-${losses}L)`);
+        setStatusMsg(`Settled ${data.settled} bets (${wins}W-${losses}L). P&L: $${data.dailyPL}`);
+      }
+      loadGames();
+    } catch (e: any) {
+      toast.error(e.message ?? "Settlement failed");
+    } finally {
+      setLoading(null);
+    }
   }
 
   const tradesByGame = new Map<string, PaperTrade[]>();
@@ -364,12 +378,12 @@ export default function Dashboard() {
             </span>
           </button>
           <button
-            onClick={() => setShowSettleModal(true)}
+            onClick={handleSettle}
             disabled={loading !== null || betCount === 0}
             className="card flex items-center justify-center gap-2 py-3 border-success/30 hover:bg-success/10 transition-colors disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
           >
-            <CheckCircle size={16} />
-            <span className="text-sm font-medium">Settle Bets</span>
+            <CheckCircle size={16} className={loading === "settle" ? "animate-spin" : ""} />
+            <span className="text-sm font-medium">{loading === "settle" ? "Settling…" : "Settle Now"}</span>
           </button>
           <button
             onClick={() => setShowManualModal(true)}
@@ -543,12 +557,6 @@ export default function Dashboard() {
         />
       )}
 
-      {showSettleModal && (
-        <SettleModal
-          onClose={() => setShowSettleModal(false)}
-          onSettled={handleSettled}
-        />
-      )}
     </div>
   );
 }
