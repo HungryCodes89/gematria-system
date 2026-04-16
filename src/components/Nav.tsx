@@ -9,6 +9,7 @@ const LINKS = [
   { href: "/history", label: "History" },
   { href: "/stats", label: "Stats" },
   { href: "/patterns", label: "Patterns" },
+  { href: "/performance", label: "Performance" },
   { href: "/settings", label: "Settings" },
   { href: "/cipher-lab", label: "Cipher Lab" },
 ];

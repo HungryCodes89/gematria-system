@@ -10,7 +10,7 @@ import type {
   TradeDecision,
   LockType,
 } from "@/lib/types";
-import type { GameAnalysisResult, MatchedPattern } from "@/lib/claude-agent";
+import type { GameAnalysisResult, MatchedPattern, ProvenPattern } from "@/lib/claude-agent";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -252,6 +252,33 @@ export async function POST(req: NextRequest) {
     return dateNums.some((n) => todayValueSet.has(n));
   });
 
+  // Fetch top proven patterns per bot (min 5 fires, top 5 by weight_score)
+  const { data: allWeights } = await supabase
+    .from("signal_weights")
+    .select("bot, signal_name, times_fired, wins, losses, win_rate, avg_clv, weight_score")
+    .gte("times_fired", 5)
+    .order("weight_score", { ascending: false });
+
+  function getTopPatterns(bot: string): ProvenPattern[] {
+    return ((allWeights ?? []) as any[])
+      .filter((w) => w.bot === bot)
+      .slice(0, 5)
+      .map((w) => ({
+        signal_name: w.signal_name,
+        times_fired: w.times_fired,
+        wins: w.wins,
+        losses: w.losses,
+        win_rate: w.win_rate,
+        avg_clv: w.avg_clv,
+        weight_score: w.weight_score,
+      }));
+  }
+
+  const provenPatternsA = getTopPatterns("A");
+  const provenPatternsB = getTopPatterns("B");
+  const provenPatternsC = getTopPatterns("C");
+  const provenPatternsD = getTopPatterns("D");
+
   const { data: ledgerRow } = await supabase
     .from("bankroll_ledger")
     .select("balance")
@@ -343,7 +370,7 @@ export async function POST(req: NextRequest) {
           const skipA = runA && botAState.gameIds.has(game.id);
           if (runA && !skipA) {
             console.log(`[analyze] Bot A analyzing ${game.away_team} @ ${game.home_team}`);
-            const { analysis, decisions } = await analyzeGameWithClaude(game, settings, "A", todayNotes, matchedPatterns);
+            const { analysis, decisions } = await analyzeGameWithClaude(game, settings, "A", todayNotes, matchedPatterns, provenPatternsA.length > 0 ? provenPatternsA : undefined);
             analysisA = analysis;
             logsA = await placeBots(supabase, game, decisions, analysis, "A", settings, botAState);
           } else if (skipA) {
@@ -356,7 +383,7 @@ export async function POST(req: NextRequest) {
           const skipB = runB && botBState.gameIds.has(game.id);
           if (runB && !skipB) {
             console.log(`[analyze] Bot B analyzing ${game.away_team} @ ${game.home_team}`);
-            const { analysis, decisions } = await analyzeGameWithClaude(game, botBSettings, "B", todayNotes, matchedPatterns);
+            const { analysis, decisions } = await analyzeGameWithClaude(game, botBSettings, "B", todayNotes, matchedPatterns, provenPatternsB.length > 0 ? provenPatternsB : undefined);
             analysisB = analysis;
             logsB = await placeBots(supabase, game, decisions, analysis, "B", settings, botBState);
           } else if (skipB) {
@@ -369,7 +396,7 @@ export async function POST(req: NextRequest) {
           const skipC = runC && botCState.gameIds.has(game.id);
           if (runC && !skipC) {
             console.log(`[analyze] Bot C analyzing ${game.away_team} @ ${game.home_team}`);
-            const { analysis, decisions } = await analyzeGameWithClaude(game, botCSettings, "C", todayNotes, matchedPatterns);
+            const { analysis, decisions } = await analyzeGameWithClaude(game, botCSettings, "C", todayNotes, matchedPatterns, provenPatternsC.length > 0 ? provenPatternsC : undefined);
             analysisC = analysis;
             logsC = await placeBots(supabase, game, decisions, analysis, "C", settings, botCState);
           } else if (skipC) {
@@ -382,7 +409,7 @@ export async function POST(req: NextRequest) {
           const skipD = runD && botDState.gameIds.has(game.id);
           if (runD && !skipD) {
             console.log(`[analyze] Bot D analyzing ${game.away_team} @ ${game.home_team}`);
-            const { analysis, decisions } = await analyzeGameWithClaude(game, botDSettings, "D", todayNotes, matchedPatterns);
+            const { analysis, decisions } = await analyzeGameWithClaude(game, botDSettings, "D", todayNotes, matchedPatterns, provenPatternsD.length > 0 ? provenPatternsD : undefined);
             analysisD = analysis;
             logsD = await placeBots(supabase, game, decisions, analysis, "D", settings, botDState);
           } else if (skipD) {

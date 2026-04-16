@@ -9,6 +9,8 @@ import { determineTradeResult, profitLossForSettledTrade } from '@/lib/settlemen
 import { getSupabaseAdmin } from '@/lib/supabase-server'
 import { fetchOddsForLeague, matchOddsApiGame } from '@/lib/the-odds-api'
 import { moneylineToImpliedProb } from '@/lib/odds-api'
+import { recordPerformanceFeedback } from '@/lib/performance-feedback'
+import type { SettledTradeRecord } from '@/lib/performance-feedback'
 import type { PaperTrade } from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
@@ -173,6 +175,7 @@ export async function POST() {
 
     // ── Settle final games ───────────────────────────────────────────────────
     let settled = 0, wins = 0, losses = 0, pushes = 0, totalPL = 0
+    const settledTradeRecords: SettledTradeRecord[] = []
 
     for (const trade of pendingTrades) {
       const liveScores = scoreMap.get(trade.game_id)
@@ -218,6 +221,25 @@ export async function POST() {
         if (result === 'win') wins++
         else if (result === 'loss') losses++
         else if (result === 'push') pushes++
+
+        // Accumulate for performance feedback (only win/loss/push, not void)
+        if (result === 'win' || result === 'loss' || result === 'push') {
+          settledTradeRecords.push({
+            id: trade.id,
+            game_id: trade.game_id,
+            game_date: (trade.game as any)?.game_date ?? null,
+            bot: trade.bot as 'A' | 'B' | 'C' | 'D',
+            lock_type: trade.lock_type ?? null,
+            bet_type: trade.bet_type ?? null,
+            picked_side: trade.picked_side ?? null,
+            pick: trade.pick ?? null,
+            odds: trade.odds ?? null,
+            confidence: trade.confidence ?? null,
+            reasoning: trade.reasoning ?? null,
+            result,
+            clv_percent: clv_percent ?? null,
+          })
+        }
       }
     }
 
@@ -242,6 +264,13 @@ export async function POST() {
           date: today, balance: newBalance,
           daily_pl: totalPL, wins, losses, bets_placed: settled,
         }, { onConflict: 'date' })
+    }
+
+    // ── Record performance feedback (non-blocking) ───────────────────────────
+    if (settledTradeRecords.length > 0) {
+      // Build allGameTrades from pendingTrades (includes all bots on same games)
+      const allGameTrades: SettledTradeRecord[] = settledTradeRecords // settled ones are enough for cross-bot comparison
+      await recordPerformanceFeedback(settledTradeRecords, allGameTrades, sb)
     }
 
     return NextResponse.json({

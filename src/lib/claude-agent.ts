@@ -32,6 +32,16 @@ export interface MatchedPattern {
   confidence_score: number | null;
 }
 
+export interface ProvenPattern {
+  signal_name: string;
+  times_fired: number;
+  wins: number;
+  losses: number;
+  win_rate: number;
+  avg_clv: number;
+  weight_score: number;
+}
+
 // ---------------------------------------------------------------------------
 // Return type
 // ---------------------------------------------------------------------------
@@ -168,7 +178,19 @@ function formatOdds(odds: ConsolidatedOdds | null): string {
   return parts.length ? parts.join("\n") : "No market odds available.";
 }
 
-function buildUserMessage(game: Game, analysis: GameAnalysis, bot?: "A" | "B" | "C" | "D", notes?: string, matchedPatterns?: MatchedPattern[]): string {
+function formatProvenPatterns(patterns: ProvenPattern[]): string {
+  const lines = patterns.map((p) => {
+    const winPct = Math.round(p.win_rate * 100);
+    const clvStr = p.avg_clv > 0 ? `+${p.avg_clv.toFixed(1)}%` : `${p.avg_clv.toFixed(1)}%`;
+    const label = p.signal_name.replace(/_/g, ' ').toUpperCase();
+    return `  ★ ${label} — ${winPct}% win rate (${p.wins}W-${p.losses}L, ${p.times_fired} bets) | Avg CLV: ${clvStr}`;
+  });
+  return `=== PROVEN PATTERNS (Your Historical Edge) ===
+These signals have the highest verified win rate from past settled bets. Weight your analysis toward conditions where these patterns fire:
+${lines.join("\n")}`;
+}
+
+function buildUserMessage(game: Game, analysis: GameAnalysis, bot?: "A" | "B" | "C" | "D", notes?: string, matchedPatterns?: MatchedPattern[], provenPatterns?: ProvenPattern[]): string {
   const moonIll = getMoonIllumination(new Date(game.game_date + "T17:00:00Z"));
   const fullMoon = isFullMoon(game.game_date);
 
@@ -191,6 +213,9 @@ Records: Home ${game.home_record ?? "N/A"} | Away ${game.away_record ?? "N/A"}
 Moon: ${(moonIll * 100).toFixed(0)}% illumination${fullMoon ? " (FULL MOON)" : ""}`
     );
     sections.push(`=== ODDS ===\n${formatOdds(game.polymarket_odds)}`);
+    if (provenPatterns && provenPatterns.length > 0) {
+      sections.push(formatProvenPatterns(provenPatterns));
+    }
     return sections.join("\n\n");
   }
 
@@ -283,6 +308,10 @@ Confidence: ${analysis.gematriaConfidence}%${bot === "A" ? `\nFavored Side: ${an
     sections.push(`=== VALIDATED PATTERN MATCHES ===\nThe following historically validated patterns match tonight's date numerology:\n${lines.join("\n\n")}`);
   }
 
+  if (provenPatterns && provenPatterns.length > 0) {
+    sections.push(formatProvenPatterns(provenPatterns));
+  }
+
   return sections.join("\n\n");
 }
 
@@ -359,7 +388,8 @@ export async function analyzeGameWithClaude(
   settings: GematriaSettings,
   bot?: "A" | "B" | "C" | "D",
   notes?: string,
-  matchedPatterns?: MatchedPattern[]
+  matchedPatterns?: MatchedPattern[],
+  provenPatterns?: ProvenPattern[]
 ): Promise<{ analysis: GameAnalysisResult; decisions: TradeDecision[] }> {
   const gameDate = new Date(game.game_date + "T00:00:00");
 
@@ -391,7 +421,7 @@ export async function analyzeGameWithClaude(
   };
 
   const systemMsg = buildSystemMessage(settings);
-  const userMsg = buildUserMessage(game, engineResult, bot, notes, matchedPatterns);
+  const userMsg = buildUserMessage(game, engineResult, bot, notes, matchedPatterns, provenPatterns);
 
   const client = new Anthropic();
   const response = await client.messages.create({
