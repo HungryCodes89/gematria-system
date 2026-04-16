@@ -3,5 +3,11 @@
     "src/app/api/analyze/route.ts": { "maxDuration": 300 },
     "src/app/api/settle/route.ts": { "maxDuration": 60 },
     "src/app/api/fetch-games/route.ts": { "maxDuration": 60 }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/settle",
+      "schedule": "*/30 * * * *"
+    }
+  ]
 }

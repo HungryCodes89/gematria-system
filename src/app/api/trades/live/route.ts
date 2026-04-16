@@ -9,7 +9,7 @@ export async function GET() {
   const [tradesRes, ledgerRes] = await Promise.all([
     sb
       .from("paper_trades")
-      .select("*, game:games!inner(*)")
+      .select("*, game:games(*)")
       .eq("result", "pending")
       .order("placed_at", { ascending: false }),
     sb

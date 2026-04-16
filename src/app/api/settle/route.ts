@@ -39,6 +39,11 @@ function extractScoresFromNhl(games: NHLGame[]): Map<string, GameScores> {
   return map
 }
 
+// Called by Vercel cron — same logic as POST
+export async function GET() {
+  return POST()
+}
+
 export async function POST() {
   try {
     const sb = getSupabaseAdmin()
