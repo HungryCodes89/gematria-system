@@ -168,7 +168,7 @@ export default function GameCard({
           )}
           {sharpLabel && (
             <span
-              title={`Sharp action detected: Pinnacle vs DraftKings line gap exceeds threshold`}
+              title={`Sharp action: ${odds?.sharpBook ?? 'sharp book'} vs ${odds?.softBook ?? 'soft book'} implied prob gap ≥3%`}
               className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400 flex items-center gap-0.5"
             >
               <Zap size={8} />

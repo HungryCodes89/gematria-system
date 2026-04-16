@@ -158,8 +158,7 @@ export async function POST() {
       if (!consolidated && !apiMatch) continue
 
       const pinnacle = apiMatch?.books['Pinnacle'] ?? null
-      const dk = apiMatch?.books['DraftKings'] ?? null
-      const sharpData = calculateSharpData(pinnacle, dk)
+      const sharpData = calculateSharpData(apiMatch?.books ?? null)
 
       const oddsJson = {
         // Polymarket base lines (fallback to Pinnacle if polymarket missed)
@@ -186,10 +185,12 @@ export async function POST() {
         pinnacleMoneylineHome: pinnacle?.moneylineHome ?? null,
         pinnacleMoneylineAway: pinnacle?.moneylineAway ?? null,
         pinnacleOverUnderLine: pinnacle?.overUnderLine ?? null,
-        // Sharp money indicator (Pinnacle vs DraftKings line comparison)
+        // Sharp money indicator (sharpest vs softest book by vig)
         sharpHome: sharpData?.sharpHome ?? null,
         sharpAway: sharpData?.sharpAway ?? null,
         sharpOU: sharpData?.sharpOU ?? null,
+        sharpBook: sharpData?.sharpBook ?? null,
+        softBook: sharpData?.softBook ?? null,
         pinnacleImpliedHome: sharpData?.pinnacleImpliedHome ?? null,
         pinnacleImpliedAway: sharpData?.pinnacleImpliedAway ?? null,
         dkImpliedHome: sharpData?.dkImpliedHome ?? null,

@@ -224,38 +224,44 @@ Set confidence based on the strength of the sacrifice evidence above.`;
 
 function formatSharpMoneySection(odds: ConsolidatedOdds | null, homeTeam: string, awayTeam: string): string | null {
   if (!odds) return null
-  const { sharpHome, sharpAway, sharpOU, pinnacleImpliedHome, pinnacleImpliedAway,
-    dkImpliedHome, dkImpliedAway, mlGapHome, mlGapAway, ouGap, pinnacleOverUnderLine } = odds
+  const {
+    sharpHome, sharpAway, sharpOU,
+    sharpBook, softBook,
+    pinnacleImpliedHome, pinnacleImpliedAway,
+    dkImpliedHome, dkImpliedAway,
+    mlGapHome, mlGapAway, ouGap, pinnacleOverUnderLine,
+  } = odds
 
   const hasSharp = sharpHome || sharpAway || sharpOU
   if (!hasSharp) return null
 
+  const sharp = sharpBook ?? 'Pinnacle'
+  const soft = softBook ?? 'DraftKings'
   const lines: string[] = []
-
   const pct = (n: number | null | undefined) => n != null ? `${(n * 100).toFixed(1)}%` : 'N/A'
 
   if (sharpHome && mlGapHome != null) {
     lines.push(
-      `  ⚡ SHARP HOME (${homeTeam}): Pinnacle ${pct(pinnacleImpliedHome)} vs DraftKings ${pct(dkImpliedHome)} — gap +${(mlGapHome * 100).toFixed(1)}%`
+      `  ⚡ SHARP HOME (${homeTeam}): ${sharp} ${pct(pinnacleImpliedHome)} vs ${soft} ${pct(dkImpliedHome)} — gap +${(mlGapHome * 100).toFixed(1)}%`
     )
   }
 
   if (sharpAway && mlGapAway != null) {
     lines.push(
-      `  ⚡ SHARP AWAY (${awayTeam}): Pinnacle ${pct(pinnacleImpliedAway)} vs DraftKings ${pct(dkImpliedAway)} — gap +${(mlGapAway * 100).toFixed(1)}%`
+      `  ⚡ SHARP AWAY (${awayTeam}): ${sharp} ${pct(pinnacleImpliedAway)} vs ${soft} ${pct(dkImpliedAway)} — gap +${(mlGapAway * 100).toFixed(1)}%`
     )
   }
 
   if (sharpOU && ouGap != null && pinnacleOverUnderLine != null) {
-    const dkOU = Math.round((pinnacleOverUnderLine - ouGap) * 10) / 10
+    const softOU = Math.round((pinnacleOverUnderLine - ouGap) * 10) / 10
     lines.push(
-      `  ⚡ SHARP ${sharpOU.toUpperCase()}: Pinnacle O/U ${pinnacleOverUnderLine} vs DraftKings ${dkOU} — gap ${ouGap > 0 ? '+' : ''}${ouGap}`
+      `  ⚡ SHARP ${sharpOU.toUpperCase()}: ${sharp} O/U ${pinnacleOverUnderLine} vs ${soft} ${softOU} — gap ${ouGap > 0 ? '+' : ''}${ouGap}`
     )
   }
 
   return `=== SHARP MONEY INDICATOR ===
-Pinnacle (sharp/professional book) differs significantly from DraftKings (public/recreational book).
-A meaningful gap indicates sophisticated bettors have moved the Pinnacle line — treat this as informed market signal.
+${sharp} (low-vig/sharp book) line differs significantly from ${soft} (recreational book).
+A meaningful gap indicates professional bettors have moved the ${sharp} line — treat as an informed market signal.
 ${lines.join('\n')}
 
 Factor sharp action into your narrative and market analysis when deciding side and sizing.`

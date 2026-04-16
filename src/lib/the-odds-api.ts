@@ -177,14 +177,18 @@ export interface SharpData {
   sharpHome: boolean
   sharpAway: boolean
   sharpOU: 'over' | 'under' | null
+  /** Which book was used as the sharp reference (lowest vig) */
+  sharpBook: string
+  /** Which book was used as the soft reference (highest vig) */
+  softBook: string
   pinnacleImpliedHome: number | null
   pinnacleImpliedAway: number | null
   dkImpliedHome: number | null
   dkImpliedAway: number | null
-  /** Pinnacle implied prob minus DraftKings implied prob; positive = sharp on that side */
+  /** sharp implied prob minus soft implied prob; positive = sharp on that side */
   mlGapHome: number | null
   mlGapAway: number | null
-  /** Pinnacle O/U minus DraftKings O/U; positive = sharp over */
+  /** sharp O/U minus soft O/U; positive = sharp over */
   ouGap: number | null
 }
 
@@ -193,33 +197,70 @@ function americanToImplied(odds: number): number {
   return (-odds) / (-odds + 100)
 }
 
-/** 3% implied probability gap between Pinnacle and DraftKings triggers SHARP flag */
+/**
+ * Vig = (impliedHome + impliedAway) - 1.
+ * Lower vig = sharper book (Pinnacle is typically ~1-2%, recreational is 5-10%).
+ */
+function bookVig(line: BookOddsLine): number | null {
+  if (line.moneylineHome == null || line.moneylineAway == null) return null
+  return americanToImplied(line.moneylineHome) + americanToImplied(line.moneylineAway) - 1
+}
+
+/** 3% implied probability gap triggers the SHARP flag */
 const SHARP_ML_THRESHOLD = 0.03
 
 /**
- * Compare Pinnacle (sharp reference) vs DraftKings (public book) lines.
- * Returns null if either book is missing.
+ * Detect sharp money action from the full books map.
+ *
+ * Strategy:
+ *  1. If Pinnacle is present, use it as the sharp reference (best market maker).
+ *  2. Otherwise, rank all books by vig and pick the lowest-vig as sharp reference
+ *     and the highest-vig as the soft reference.
+ *  3. A 3%+ implied probability gap (or 0.5+ O/U gap) triggers SHARP.
+ *
+ * Logs which book pair was used so the UI/prompt can name them correctly.
  */
 export function calculateSharpData(
-  pinnacle: BookOddsLine | null,
-  dk: BookOddsLine | null,
+  books: Record<string, BookOddsLine> | null | undefined,
 ): SharpData | null {
-  if (!pinnacle || !dk) return null
+  if (!books || Object.keys(books).length < 2) return null
 
-  const pinHome = pinnacle.moneylineHome != null ? americanToImplied(pinnacle.moneylineHome) : null
-  const pinAway = pinnacle.moneylineAway != null ? americanToImplied(pinnacle.moneylineAway) : null
-  const dkHome = dk.moneylineHome != null ? americanToImplied(dk.moneylineHome) : null
-  const dkAway = dk.moneylineAway != null ? americanToImplied(dk.moneylineAway) : null
+  // Build a ranked list: [bookName, line, vig] sorted by vig ascending (sharpest first)
+  const ranked: Array<{ name: string; line: BookOddsLine; vig: number }> = []
+  for (const [name, line] of Object.entries(books)) {
+    const v = bookVig(line)
+    if (v != null) ranked.push({ name, line, vig: v })
+  }
+  if (ranked.length < 2) return null
+  ranked.sort((a, b) => a.vig - b.vig)
 
-  const mlGapHome = pinHome != null && dkHome != null ? pinHome - dkHome : null
-  const mlGapAway = pinAway != null && dkAway != null ? pinAway - dkAway : null
+  // Prefer Pinnacle as sharp reference if it's present and has lines
+  const pinnacleEntry = ranked.find((r) => r.name === 'Pinnacle')
+  const sharpEntry = pinnacleEntry ?? ranked[0]!
+  // Soft reference: highest vig book, must not be the same as sharp
+  const softEntry = ranked[ranked.length - 1]!.name === sharpEntry.name
+    ? ranked[ranked.length - 2]!
+    : ranked[ranked.length - 1]!
 
-  const sharpHome = mlGapHome != null && mlGapHome > SHARP_ML_THRESHOLD
-  const sharpAway = mlGapAway != null && mlGapAway > SHARP_ML_THRESHOLD
+  if (!sharpEntry || !softEntry) return null
+
+  const sharpLine = sharpEntry.line
+  const softLine = softEntry.line
+
+  const sharpHome = sharpLine.moneylineHome != null ? americanToImplied(sharpLine.moneylineHome) : null
+  const sharpAway = sharpLine.moneylineAway != null ? americanToImplied(sharpLine.moneylineAway) : null
+  const softHome = softLine.moneylineHome != null ? americanToImplied(softLine.moneylineHome) : null
+  const softAway = softLine.moneylineAway != null ? americanToImplied(softLine.moneylineAway) : null
+
+  const mlGapHome = sharpHome != null && softHome != null ? sharpHome - softHome : null
+  const mlGapAway = sharpAway != null && softAway != null ? sharpAway - softAway : null
+
+  const isSharpHome = mlGapHome != null && mlGapHome > SHARP_ML_THRESHOLD
+  const isSharpAway = mlGapAway != null && mlGapAway > SHARP_ML_THRESHOLD
 
   const ouGap =
-    pinnacle.overUnderLine != null && dk.overUnderLine != null
-      ? pinnacle.overUnderLine - dk.overUnderLine
+    sharpLine.overUnderLine != null && softLine.overUnderLine != null
+      ? sharpLine.overUnderLine - softLine.overUnderLine
       : null
   const sharpOU: 'over' | 'under' | null =
     ouGap != null ? (ouGap > 0.5 ? 'over' : ouGap < -0.5 ? 'under' : null) : null
@@ -228,13 +269,16 @@ export function calculateSharpData(
   const r1 = (n: number | null) => (n != null ? Math.round(n * 10) / 10 : null)
 
   return {
-    sharpHome,
-    sharpAway,
+    sharpHome: isSharpHome,
+    sharpAway: isSharpAway,
     sharpOU,
-    pinnacleImpliedHome: r3(pinHome),
-    pinnacleImpliedAway: r3(pinAway),
-    dkImpliedHome: r3(dkHome),
-    dkImpliedAway: r3(dkAway),
+    sharpBook: sharpEntry.name,
+    softBook: softEntry.name,
+    // Keep field names stable for existing consumers — "pinnacle" slot = sharp ref
+    pinnacleImpliedHome: r3(sharpHome),
+    pinnacleImpliedAway: r3(sharpAway),
+    dkImpliedHome: r3(softHome),
+    dkImpliedAway: r3(softAway),
     mlGapHome: r3(mlGapHome),
     mlGapAway: r3(mlGapAway),
     ouGap: r1(ouGap),

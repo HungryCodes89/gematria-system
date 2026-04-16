@@ -61,13 +61,15 @@ export interface ConsolidatedOdds {
   pinnacleMoneylineHome?: number | null;
   pinnacleMoneylineAway?: number | null;
   pinnacleOverUnderLine?: number | null;
-  // Sharp money indicator (Pinnacle vs DraftKings)
+  // Sharp money indicator (sharpest book vs softest book by vig)
   sharpHome?: boolean | null;
   sharpAway?: boolean | null;
   sharpOU?: 'over' | 'under' | null;
-  pinnacleImpliedHome?: number | null;
+  sharpBook?: string | null;  // which book is the sharp reference (lowest vig)
+  softBook?: string | null;   // which book is the soft reference (highest vig)
+  pinnacleImpliedHome?: number | null;  // sharp-book implied prob
   pinnacleImpliedAway?: number | null;
-  dkImpliedHome?: number | null;
+  dkImpliedHome?: number | null;        // soft-book implied prob
   dkImpliedAway?: number | null;
   mlGapHome?: number | null;
   mlGapAway?: number | null;
