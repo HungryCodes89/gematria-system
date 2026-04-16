@@ -140,6 +140,66 @@ export function extractSignals(trade: TradeSignalData): SignalName[] {
   return [...signals]
 }
 
+// Jesuit/Masonic numbers for pre-analysis detection
+const JESUIT_NUMBERS = new Set([33, 42, 47, 56, 59, 72, 84, 113, 131, 144, 187, 201, 322])
+
+/**
+ * Pre-analysis signals: derived from the gematria engine output + game odds
+ * BEFORE Claude runs. Used for sacrifice pattern detection.
+ * No reasoning text is available yet — structural signals only.
+ */
+export interface PreAnalysisData {
+  pickedSide: 'home' | 'away' | null
+  fullMoon: boolean
+  pickedOdds: number | null        // American odds for the engine-favored side
+  alignmentCount: number
+  alignmentCiphers: string[]       // e.g. ['Ordinal', 'Reverse Reduction', ...]
+  alignmentValues: number[]        // gematria values from each alignment
+  alignmentTypes: string[]         // AlignmentType enum values
+}
+
+export function extractPreAnalysisSignals(data: PreAnalysisData): SignalName[] {
+  const signals = new Set<SignalName>()
+
+  signals.add('triple_lock') // always called in triple-lock sacrifice-check context
+
+  if (data.pickedSide === 'home') signals.add('home_ml')
+  if (data.pickedSide === 'away') signals.add('away_ml')
+
+  if (data.fullMoon) signals.add('full_moon')
+
+  if (data.pickedOdds != null) {
+    if (data.pickedOdds > 0) signals.add('plus_odds')
+    if (data.pickedOdds < -150) signals.add('heavy_fav')
+  }
+
+  if (data.alignmentCount >= 4) signals.add('high_alignment')
+  if (data.alignmentCount > 0) signals.add('date_alignment')
+
+  for (const cipher of data.alignmentCiphers) {
+    const c = cipher.toLowerCase()
+    if (c.includes('reverse')) signals.add('reverse_cipher')
+    else if (c.includes('ordinal')) signals.add('ordinal_cipher')
+    if (c.includes('reduction') || c.includes('reduced')) signals.add('reduction_cipher')
+  }
+
+  for (const val of data.alignmentValues) {
+    if (JESUIT_NUMBERS.has(val)) {
+      signals.add('jesuit_marker')
+      break
+    }
+  }
+
+  const NAME_TYPES = new Set(['date_city', 'date_team', 'date_fullname', 'date_abbreviation'])
+  const VENUE_TYPES = new Set(['venue', 'venue_part'])
+  for (const t of data.alignmentTypes) {
+    if (NAME_TYPES.has(t)) signals.add('name_match')
+    if (VENUE_TYPES.has(t)) signals.add('venue_match')
+  }
+
+  return [...signals]
+}
+
 /** Human-readable labels for the UI */
 export const SIGNAL_LABELS: Record<SignalName, string> = {
   triple_lock: 'Triple Lock',

@@ -157,6 +157,7 @@ export type LockType =
   | "triple_lock"
   | "double_lock"
   | "single_lock"
+  | "sacrifice_lock"
   | "no_lock";
 
 export interface Alignment {

@@ -16,6 +16,7 @@ import {
 } from "@/lib/analysis-engine";
 import { calculateDateNumerology } from "@/lib/gematria";
 import { getMoonIllumination, isFullMoon } from "@/lib/moon-phase";
+import { extractPreAnalysisSignals, type PreAnalysisData, type SignalName } from "@/lib/signal-extractor";
 
 // ---------------------------------------------------------------------------
 // Pattern library types
@@ -42,6 +43,18 @@ export interface ProvenPattern {
   weight_score: number;
 }
 
+export interface SacrificePattern {
+  signal_name: string;
+  triple_lock_fires: number;
+  sacrifice_outcomes: number;
+  lock_outcomes: number;
+  sacrifice_rate: number;
+}
+
+const SACRIFICE_RATE_THRESHOLD = 0.60; // signal must show ≥60% sacrifice rate
+const SACRIFICE_MIN_FIRES = 3;         // must have appeared on ≥3 triple lock games
+const SACRIFICE_SIGNAL_COUNT = 2;      // need ≥2 qualifying signals to trigger flip
+
 // ---------------------------------------------------------------------------
 // Return type
 // ---------------------------------------------------------------------------
@@ -51,6 +64,8 @@ export interface GameAnalysisResult {
   confidence: number;
   pickedSide: "home" | "away" | null;
   alignmentCount: number;
+  sacrificeLock?: boolean;
+  sacrificeSignals?: SacrificePattern[];
 }
 
 const LOCK_MAP: Record<EngineLockType, TypesLockType> = {
@@ -178,6 +193,35 @@ function formatOdds(odds: ConsolidatedOdds | null): string {
   return parts.length ? parts.join("\n") : "No market odds available.";
 }
 
+function formatSacrificeAlert(
+  engineFavoredTeam: string,
+  opponent: string,
+  engineFavoredSide: "home" | "away",
+  signals: SacrificePattern[]
+): string {
+  const signalLines = signals.map((s) => {
+    const rate = Math.round(s.sacrifice_rate * 100);
+    return `  ⚠ ${s.signal_name.replace(/_/g, ' ').toUpperCase()} — ${rate}% sacrifice rate (${s.triple_lock_fires} triple lock games)`;
+  });
+  const opponentSide = engineFavoredSide === "home" ? "away" : "home";
+  return `=== SACRIFICE LOCK DETECTED — READ CAREFULLY ===
+Pattern analysis reveals high sacrifice probability on this Triple Lock game.
+In gematria, a sacrifice occurs when the numerologically scripted team is encoded as the OFFERING — they lose, not win. The alignments mark them for defeat.
+
+SACRIFICE SIGNALS ACTIVE:
+${signalLines.join("\n")}
+
+THE SCRIPTED SACRIFICE: ${engineFavoredTeam} (${engineFavoredSide} team — engine-favored)
+THE RECOMMENDED BET:    ${opponent} (${opponentSide} team — fade the sacrifice)
+
+INSTRUCTION: Bet AGAINST the Triple Lock team. Analyze ${opponent} as your pick.
+In your JSON response:
+  "pick": "${opponent}"
+  "pickedSide": "${opponentSide}"
+  "reasoning": start with "SACRIFICE LOCK: ..." and explain the sacrifice signals
+Set confidence based on the strength of the sacrifice evidence above.`;
+}
+
 function formatProvenPatterns(patterns: ProvenPattern[]): string {
   const lines = patterns.map((p) => {
     const winPct = Math.round(p.win_rate * 100);
@@ -190,7 +234,16 @@ These signals have the highest verified win rate from past settled bets. Weight 
 ${lines.join("\n")}`;
 }
 
-function buildUserMessage(game: Game, analysis: GameAnalysis, bot?: "A" | "B" | "C" | "D", notes?: string, matchedPatterns?: MatchedPattern[], provenPatterns?: ProvenPattern[]): string {
+function buildUserMessage(
+  game: Game,
+  analysis: GameAnalysis,
+  bot?: "A" | "B" | "C" | "D",
+  notes?: string,
+  matchedPatterns?: MatchedPattern[],
+  provenPatterns?: ProvenPattern[],
+  sacrificeLock?: boolean,
+  sacrificeSignals?: SacrificePattern[]
+): string {
   const moonIll = getMoonIllumination(new Date(game.game_date + "T17:00:00Z"));
   const fullMoon = isFullMoon(game.game_date);
 
@@ -215,6 +268,11 @@ Moon: ${(moonIll * 100).toFixed(0)}% illumination${fullMoon ? " (FULL MOON)" : "
     sections.push(`=== ODDS ===\n${formatOdds(game.polymarket_odds)}`);
     if (provenPatterns && provenPatterns.length > 0) {
       sections.push(formatProvenPatterns(provenPatterns));
+    }
+    if (sacrificeLock && sacrificeSignals && analysis.pickedSide && analysis.pickedSide !== "skip") {
+      const engineFavored = analysis.pickedSide === "home" ? game.home_team : game.away_team;
+      const opponent = analysis.pickedSide === "home" ? game.away_team : game.home_team;
+      sections.push(formatSacrificeAlert(engineFavored, opponent, analysis.pickedSide as "home" | "away", sacrificeSignals));
     }
     return sections.join("\n\n");
   }
@@ -312,6 +370,12 @@ Confidence: ${analysis.gematriaConfidence}%${bot === "A" ? `\nFavored Side: ${an
     sections.push(formatProvenPatterns(provenPatterns));
   }
 
+  if (sacrificeLock && sacrificeSignals && analysis.pickedSide && analysis.pickedSide !== "skip") {
+    const engineFavored = analysis.pickedSide === "home" ? game.home_team : game.away_team;
+    const opponent = analysis.pickedSide === "home" ? game.away_team : game.home_team;
+    sections.push(formatSacrificeAlert(engineFavored, opponent, analysis.pickedSide as "home" | "away", sacrificeSignals));
+  }
+
   return sections.join("\n\n");
 }
 
@@ -389,7 +453,8 @@ export async function analyzeGameWithClaude(
   bot?: "A" | "B" | "C" | "D",
   notes?: string,
   matchedPatterns?: MatchedPattern[],
-  provenPatterns?: ProvenPattern[]
+  provenPatterns?: ProvenPattern[],
+  sacrificePatterns?: SacrificePattern[]
 ): Promise<{ analysis: GameAnalysisResult; decisions: TradeDecision[] }> {
   const gameDate = new Date(game.game_date + "T00:00:00");
 
@@ -420,8 +485,62 @@ export async function analyzeGameWithClaude(
       engineResult.homeAlignments.length + engineResult.awayAlignments.length,
   };
 
+  // ── Sacrifice detection ───────────────────────────────────────────────────
+  // Only runs on Triple Lock games when we have historical sacrifice pattern data.
+  let detectedSacrificeLock = false;
+  let matchedSacrificeSignals: SacrificePattern[] = [];
+
+  if (
+    engineResult.lockType === "triple" &&
+    bot &&
+    sacrificePatterns &&
+    sacrificePatterns.length > 0 &&
+    engineResult.pickedSide !== "skip"
+  ) {
+    const allAlignments = [...engineResult.homeAlignments, ...engineResult.awayAlignments];
+    const pickedSide = engineResult.pickedSide as "home" | "away";
+    const pickedOdds = (() => {
+      const o = game.polymarket_odds;
+      if (!o) return null;
+      return pickedSide === "home" ? o.moneylineHome : o.moneylineAway;
+    })();
+
+    const preData: PreAnalysisData = {
+      pickedSide,
+      fullMoon,
+      pickedOdds,
+      alignmentCount: allAlignments.length,
+      alignmentCiphers: allAlignments.map((a) => a.cipher),
+      alignmentValues: allAlignments.map((a) => a.value),
+      alignmentTypes: allAlignments.map((a) => a.type),
+    };
+
+    const preSignals = new Set<string>(extractPreAnalysisSignals(preData));
+
+    matchedSacrificeSignals = sacrificePatterns.filter(
+      (p) =>
+        preSignals.has(p.signal_name) &&
+        p.sacrifice_rate >= SACRIFICE_RATE_THRESHOLD &&
+        p.triple_lock_fires >= SACRIFICE_MIN_FIRES
+    );
+
+    if (matchedSacrificeSignals.length >= SACRIFICE_SIGNAL_COUNT) {
+      detectedSacrificeLock = true;
+      analysisResult.lockType = "sacrifice_lock";
+      analysisResult.sacrificeLock = true;
+      analysisResult.sacrificeSignals = matchedSacrificeSignals;
+      console.log(
+        `[sacrifice] Detected on ${game.away_team} @ ${game.home_team} for Bot ${bot} — ${matchedSacrificeSignals.length} signals (${matchedSacrificeSignals.map((s) => s.signal_name).join(", ")})`
+      );
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   const systemMsg = buildSystemMessage(settings);
-  const userMsg = buildUserMessage(game, engineResult, bot, notes, matchedPatterns, provenPatterns);
+  const userMsg = buildUserMessage(
+    game, engineResult, bot, notes, matchedPatterns, provenPatterns,
+    detectedSacrificeLock, matchedSacrificeSignals.length > 0 ? matchedSacrificeSignals : undefined
+  );
 
   const client = new Anthropic();
   const response = await client.messages.create({

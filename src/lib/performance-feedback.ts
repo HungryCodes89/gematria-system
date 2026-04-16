@@ -69,6 +69,54 @@ function computeConsensus(
   return { consensusResult, otherBotPicks }
 }
 
+/**
+ * Upserts sacrifice_patterns for a triple_lock bet that has settled.
+ * Only called for trades where lock_type === 'triple_lock' (not sacrifice_lock).
+ */
+async function upsertSacrificePatterns(
+  sb: SupabaseClient,
+  bot: BotId,
+  signals: string[],
+  result: 'win' | 'loss' | 'push'
+) {
+  if (signals.length === 0) return
+
+  const { data: existing } = await sb
+    .from('sacrifice_patterns')
+    .select('*')
+    .eq('bot', bot)
+    .in('signal_name', signals)
+
+  const existingMap = new Map(
+    (existing ?? []).map((r: any) => [r.signal_name as string, r])
+  )
+
+  const upserts = signals.map((signal) => {
+    const cur = existingMap.get(signal) ?? {
+      bot, signal_name: signal, triple_lock_fires: 0, sacrifice_outcomes: 0, lock_outcomes: 0,
+    }
+
+    const triple_lock_fires = (cur.triple_lock_fires ?? 0) + 1
+    const sacrifice_outcomes = (cur.sacrifice_outcomes ?? 0) + (result === 'loss' ? 1 : 0)
+    const lock_outcomes = (cur.lock_outcomes ?? 0) + (result === 'win' ? 1 : 0)
+    // Pushes increment triple_lock_fires but neither outcome — sacrifice_rate unchanged
+    const decided = sacrifice_outcomes + lock_outcomes
+    const sacrifice_rate = decided > 0 ? sacrifice_outcomes / decided : 0
+
+    return {
+      bot,
+      signal_name: signal,
+      triple_lock_fires,
+      sacrifice_outcomes,
+      lock_outcomes,
+      sacrifice_rate: Math.round(sacrifice_rate * 10000) / 10000,
+      last_updated: new Date().toISOString(),
+    }
+  })
+
+  await sb.from('sacrifice_patterns').upsert(upserts, { onConflict: 'bot,signal_name' })
+}
+
 async function upsertSignalWeights(
   sb: SupabaseClient,
   bot: BotId,
@@ -149,6 +197,13 @@ export async function recordPerformanceFeedback(
       const signals = extractSignals(trade)
       const { consensusResult, otherBotPicks } = computeConsensus(trade, allGameTrades)
 
+      // Sacrifice detection:
+      // A Triple Lock team that lost = sacrifice confirmed (the pick was wrong direction).
+      // A Sacrifice Lock that won = we correctly flipped; sacrifice_detected stays false
+      // (the underlying TL team still lost, but we weren't holding that ticket).
+      const sacrifice_detected =
+        trade.lock_type === 'triple_lock' && trade.result === 'loss'
+
       // Insert feedback record
       await sb.from('performance_feedback').insert({
         trade_id: trade.id,
@@ -160,10 +215,18 @@ export async function recordPerformanceFeedback(
         clv_percent: trade.clv_percent,
         other_bot_picks: otherBotPicks,
         consensus_result: consensusResult,
+        sacrifice_detected,
       })
 
-      // Update signal weights for this bot
+      // Update signal weights for this bot (all trade types)
       await upsertSignalWeights(sb, trade.bot, signals, trade.result, trade.clv_percent)
+
+      // Update sacrifice patterns ONLY for raw triple_lock bets (not sacrifice_lock flips).
+      // sacrifice_lock bets are already the flipped pick — they don't contribute to the
+      // "how often does signal X cause triple_lock losses" pattern database.
+      if (trade.lock_type === 'triple_lock') {
+        await upsertSacrificePatterns(sb, trade.bot, signals, trade.result)
+      }
     }
   } catch (err) {
     console.error('[performance-feedback] Error recording feedback:', err)

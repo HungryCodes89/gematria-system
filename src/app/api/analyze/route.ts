@@ -10,16 +10,17 @@ import type {
   TradeDecision,
   LockType,
 } from "@/lib/types";
-import type { GameAnalysisResult, MatchedPattern, ProvenPattern } from "@/lib/claude-agent";
+import type { GameAnalysisResult, MatchedPattern, ProvenPattern, SacrificePattern } from "@/lib/claude-agent";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const AUTO_BET_MAP: Record<LockType, keyof GematriaSettings | null> = {
-  triple_lock: "auto_bet_triple_locks",
-  double_lock: "auto_bet_double_locks",
-  single_lock: "auto_bet_single_locks",
-  no_lock: null,
+  triple_lock:    "auto_bet_triple_locks",
+  double_lock:    "auto_bet_double_locks",
+  single_lock:    "auto_bet_single_locks",
+  sacrifice_lock: "auto_bet_triple_locks", // same threshold as triple lock
+  no_lock:        null,
 };
 
 // Bots B/C/D use their own confidence to determine lock type — they are not
@@ -92,12 +93,15 @@ async function placeBots(
       continue;
     }
 
-    // Bot A is gated by the gematria engine lock type.
-    // Bots B/C/D derive their own lock type from Claude's confidence so each
-    // bot independently decides which games to bet — they won't all pick the same games.
-    const effectiveLockType = bot === "A"
-      ? analysis.lockType
-      : confidenceToLockType(decision.confidence);
+    // Sacrifice lock overrides all bots — when sacrifice is detected, all bots
+    // treat this as a sacrifice_lock regardless of bot identity or confidence.
+    // Otherwise: Bot A uses the engine's lock type; B/C/D derive from confidence.
+    const effectiveLockType =
+      analysis.lockType === "sacrifice_lock"
+        ? "sacrifice_lock"
+        : bot === "A"
+          ? analysis.lockType
+          : confidenceToLockType(decision.confidence);
 
     const autoBetKey = AUTO_BET_MAP[effectiveLockType];
     if (!autoBetKey) {
@@ -279,6 +283,29 @@ export async function POST(req: NextRequest) {
   const provenPatternsC = getTopPatterns("C");
   const provenPatternsD = getTopPatterns("D");
 
+  // Fetch sacrifice patterns — used to detect when Triple Lock teams are scripted to lose
+  const { data: allSacrificeData } = await supabase
+    .from("sacrifice_patterns")
+    .select("bot, signal_name, triple_lock_fires, sacrifice_outcomes, lock_outcomes, sacrifice_rate")
+    .order("sacrifice_rate", { ascending: false });
+
+  function getBotSacrificePatterns(bot: string): SacrificePattern[] {
+    return ((allSacrificeData ?? []) as any[])
+      .filter((p) => p.bot === bot)
+      .map((p) => ({
+        signal_name: p.signal_name,
+        triple_lock_fires: p.triple_lock_fires,
+        sacrifice_outcomes: p.sacrifice_outcomes,
+        lock_outcomes: p.lock_outcomes,
+        sacrifice_rate: p.sacrifice_rate,
+      }));
+  }
+
+  const sacrificePatternsA = getBotSacrificePatterns("A");
+  const sacrificePatternsB = getBotSacrificePatterns("B");
+  const sacrificePatternsC = getBotSacrificePatterns("C");
+  const sacrificePatternsD = getBotSacrificePatterns("D");
+
   const { data: ledgerRow } = await supabase
     .from("bankroll_ledger")
     .select("balance")
@@ -370,7 +397,7 @@ export async function POST(req: NextRequest) {
           const skipA = runA && botAState.gameIds.has(game.id);
           if (runA && !skipA) {
             console.log(`[analyze] Bot A analyzing ${game.away_team} @ ${game.home_team}`);
-            const { analysis, decisions } = await analyzeGameWithClaude(game, settings, "A", todayNotes, matchedPatterns, provenPatternsA.length > 0 ? provenPatternsA : undefined);
+            const { analysis, decisions } = await analyzeGameWithClaude(game, settings, "A", todayNotes, matchedPatterns, provenPatternsA.length > 0 ? provenPatternsA : undefined, sacrificePatternsA.length > 0 ? sacrificePatternsA : undefined);
             analysisA = analysis;
             logsA = await placeBots(supabase, game, decisions, analysis, "A", settings, botAState);
           } else if (skipA) {
@@ -383,7 +410,7 @@ export async function POST(req: NextRequest) {
           const skipB = runB && botBState.gameIds.has(game.id);
           if (runB && !skipB) {
             console.log(`[analyze] Bot B analyzing ${game.away_team} @ ${game.home_team}`);
-            const { analysis, decisions } = await analyzeGameWithClaude(game, botBSettings, "B", todayNotes, matchedPatterns, provenPatternsB.length > 0 ? provenPatternsB : undefined);
+            const { analysis, decisions } = await analyzeGameWithClaude(game, botBSettings, "B", todayNotes, matchedPatterns, provenPatternsB.length > 0 ? provenPatternsB : undefined, sacrificePatternsB.length > 0 ? sacrificePatternsB : undefined);
             analysisB = analysis;
             logsB = await placeBots(supabase, game, decisions, analysis, "B", settings, botBState);
           } else if (skipB) {
@@ -396,7 +423,7 @@ export async function POST(req: NextRequest) {
           const skipC = runC && botCState.gameIds.has(game.id);
           if (runC && !skipC) {
             console.log(`[analyze] Bot C analyzing ${game.away_team} @ ${game.home_team}`);
-            const { analysis, decisions } = await analyzeGameWithClaude(game, botCSettings, "C", todayNotes, matchedPatterns, provenPatternsC.length > 0 ? provenPatternsC : undefined);
+            const { analysis, decisions } = await analyzeGameWithClaude(game, botCSettings, "C", todayNotes, matchedPatterns, provenPatternsC.length > 0 ? provenPatternsC : undefined, sacrificePatternsC.length > 0 ? sacrificePatternsC : undefined);
             analysisC = analysis;
             logsC = await placeBots(supabase, game, decisions, analysis, "C", settings, botCState);
           } else if (skipC) {
@@ -409,7 +436,7 @@ export async function POST(req: NextRequest) {
           const skipD = runD && botDState.gameIds.has(game.id);
           if (runD && !skipD) {
             console.log(`[analyze] Bot D analyzing ${game.away_team} @ ${game.home_team}`);
-            const { analysis, decisions } = await analyzeGameWithClaude(game, botDSettings, "D", todayNotes, matchedPatterns, provenPatternsD.length > 0 ? provenPatternsD : undefined);
+            const { analysis, decisions } = await analyzeGameWithClaude(game, botDSettings, "D", todayNotes, matchedPatterns, provenPatternsD.length > 0 ? provenPatternsD : undefined, sacrificePatternsD.length > 0 ? sacrificePatternsD : undefined);
             analysisD = analysis;
             logsD = await placeBots(supabase, game, decisions, analysis, "D", settings, botDState);
           } else if (skipD) {

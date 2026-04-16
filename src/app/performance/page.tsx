@@ -2,7 +2,10 @@
 
 import { useEffect, useState } from "react";
 import Nav from "@/components/Nav";
-import { Activity, TrendingUp, TrendingDown, Minus, Flame, Snowflake, RefreshCw } from "lucide-react";
+import {
+  Activity, TrendingUp, TrendingDown, Minus,
+  Flame, Snowflake, RefreshCw, Skull, ChevronDown, ChevronRight,
+} from "lucide-react";
 import { SIGNAL_LABELS } from "@/lib/signal-extractor";
 
 type BotId = "A" | "B" | "C" | "D";
@@ -19,6 +22,26 @@ interface SignalRow {
   last_updated: string;
 }
 
+interface SacrificePatternRow {
+  signal_name: string;
+  triple_lock_fires: number;
+  sacrifice_outcomes: number;
+  lock_outcomes: number;
+  sacrifice_rate: number;
+}
+
+interface SacrificeStats {
+  totalTripleLocks: number;
+  tripleWins: number;
+  tripleLosses: number;
+  historicalSacrificeRate: number;
+  sacrificeLocksPlaced: number;
+  sacrificeLockWins: number;
+  sacrificeLockLosses: number;
+  sacrificeLockWinRate: number;
+  patterns: SacrificePatternRow[];
+}
+
 interface BotStats {
   totalBets: number;
   wins: number;
@@ -27,6 +50,7 @@ interface BotStats {
   winRate: number;
   avgClv: number;
   signals: SignalRow[];
+  sacrifice: SacrificeStats;
   lastFeedback: string | null;
 }
 
@@ -62,6 +86,13 @@ function getSignalStatus(row: SignalRow): SignalStatus {
   return "neutral";
 }
 
+function getSacrificeSignalStatus(rate: number, fires: number): "danger" | "warning" | "neutral" | "new" {
+  if (fires < 3) return "new";
+  if (rate >= 0.65) return "danger";
+  if (rate >= 0.55) return "warning";
+  return "neutral";
+}
+
 function SignalStatusBadge({ status }: { status: SignalStatus }) {
   if (status === "hot") return <span className="flex items-center gap-1 text-warning text-[10px] font-bold"><Flame size={10} />HOT</span>;
   if (status === "warm") return <span className="flex items-center gap-1 text-success text-[10px]"><TrendingUp size={10} />WARM</span>;
@@ -72,12 +103,145 @@ function SignalStatusBadge({ status }: { status: SignalStatus }) {
 }
 
 function WinRateBar({ rate, decided }: { rate: number; decided: number }) {
-  if (decided === 0) return <div className="h-1 bg-surface-2 rounded-full w-full opacity-30" />;
+  if (decided === 0) return <div className="h-1 bg-surface rounded-full w-full opacity-30" />;
   const pct = Math.round(rate * 100);
   const color = pct >= 55 ? "bg-success" : pct >= 50 ? "bg-accent" : pct >= 45 ? "bg-warning" : "bg-danger";
   return (
     <div className="h-1 bg-surface rounded-full w-full overflow-hidden">
       <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${pct}%` }} />
+    </div>
+  );
+}
+
+function SacrificeRateBar({ rate, fires }: { rate: number; fires: number }) {
+  if (fires === 0) return <div className="h-1 bg-surface rounded-full w-full opacity-30" />;
+  const pct = Math.round(rate * 100);
+  const color = pct >= 65 ? "bg-red-500" : pct >= 55 ? "bg-warning" : "bg-muted";
+  return (
+    <div className="h-1 bg-surface rounded-full w-full overflow-hidden">
+      <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${pct}%` }} />
+    </div>
+  );
+}
+
+function SacrificeSection({ sacrifice, colorClass }: { sacrifice: SacrificeStats; colorClass: string }) {
+  const [showPatterns, setShowPatterns] = useState(false);
+  const hasPatterns = sacrifice.patterns.length > 0;
+  const hasFlipData = sacrifice.sacrificeLocksPlaced > 0;
+
+  return (
+    <div className="mt-4 border-t border-border/50 pt-4">
+      <div className="flex items-center gap-2 mb-3">
+        <Skull size={12} className="text-red-400" />
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-red-400">Sacrifice Detection</span>
+      </div>
+
+      {/* Sacrifice stats row */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+        <div className="bg-surface/50 rounded p-2 text-center">
+          <div className="text-[10px] text-muted mb-0.5">Triple Locks</div>
+          <div className="font-mono text-sm font-bold">
+            {sacrifice.totalTripleLocks > 0
+              ? <><span className="text-success">{sacrifice.tripleWins}W</span><span className="text-muted">-</span><span className="text-danger">{sacrifice.tripleLosses}L</span></>
+              : <span className="text-muted">—</span>}
+          </div>
+        </div>
+        <div className="bg-surface/50 rounded p-2 text-center">
+          <div className="text-[10px] text-muted mb-0.5">Historical Sacrifice Rate</div>
+          <div className={`font-mono text-sm font-bold ${sacrifice.historicalSacrificeRate >= 0.50 ? "text-danger" : "text-muted"}`}>
+            {sacrifice.totalTripleLocks > 0
+              ? `${Math.round(sacrifice.historicalSacrificeRate * 100)}%`
+              : "—"}
+          </div>
+          <div className="text-[9px] text-muted">TL team lost</div>
+        </div>
+        <div className="bg-red-500/5 border border-red-500/20 rounded p-2 text-center">
+          <div className="text-[10px] text-red-400 mb-0.5">Sacrifice Flips</div>
+          <div className="font-mono text-sm font-bold text-red-300">
+            {hasFlipData
+              ? <><span className="text-success">{sacrifice.sacrificeLockWins}W</span><span className="text-muted">-</span><span className="text-danger">{sacrifice.sacrificeLockLosses}L</span></>
+              : <span className="text-muted">—</span>}
+          </div>
+          <div className="text-[9px] text-muted">{sacrifice.sacrificeLocksPlaced} placed</div>
+        </div>
+        <div className="bg-red-500/5 border border-red-500/20 rounded p-2 text-center">
+          <div className="text-[10px] text-red-400 mb-0.5">Flip Win Rate</div>
+          <div className={`font-mono text-sm font-bold ${sacrifice.sacrificeLockWinRate >= 0.55 ? "text-success" : sacrifice.sacrificeLockWinRate > 0 ? "text-warning" : "text-muted"}`}>
+            {hasFlipData
+              ? `${Math.round(sacrifice.sacrificeLockWinRate * 100)}%`
+              : "—"}
+          </div>
+        </div>
+      </div>
+
+      {/* Sacrifice patterns table */}
+      {hasPatterns && (
+        <button
+          onClick={() => setShowPatterns(!showPatterns)}
+          className="flex items-center gap-1.5 text-[10px] text-muted hover:text-red-400 transition-colors mb-2"
+        >
+          {showPatterns ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+          {showPatterns ? "Hide" : "Show"} sacrifice patterns ({sacrifice.patterns.length} signals)
+        </button>
+      )}
+
+      {showPatterns && hasPatterns && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-muted border-b border-border">
+                <th className="text-left py-1.5 pr-3 font-medium">Signal</th>
+                <th className="text-right py-1.5 px-2 font-medium">TL Games</th>
+                <th className="text-right py-1.5 px-2 font-medium">Sacrifice</th>
+                <th className="text-right py-1.5 px-2 font-medium">Lock</th>
+                <th className="text-right py-1.5 px-2 font-medium">Sacrifice%</th>
+                <th className="py-1.5 px-2 font-medium w-20">Rate</th>
+                <th className="text-right py-1.5 pl-2 font-medium">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sacrifice.patterns.map((p) => {
+                const status = getSacrificeSignalStatus(p.sacrifice_rate, p.triple_lock_fires);
+                const label = (SIGNAL_LABELS as Record<string, string>)[p.signal_name] ?? p.signal_name;
+                const pct = Math.round(p.sacrifice_rate * 100);
+                const rowBg =
+                  status === "danger" ? "bg-red-500/10" :
+                  status === "warning" ? "bg-warning/5" : "";
+
+                return (
+                  <tr key={p.signal_name} className={`border-b border-border/30 ${rowBg}`}>
+                    <td className="py-1.5 pr-3 font-medium text-text/90">{label}</td>
+                    <td className="text-right py-1.5 px-2 font-mono text-muted">{p.triple_lock_fires}</td>
+                    <td className="text-right py-1.5 px-2 font-mono text-danger">{p.sacrifice_outcomes}</td>
+                    <td className="text-right py-1.5 px-2 font-mono text-success">{p.lock_outcomes}</td>
+                    <td className="text-right py-1.5 px-2 font-mono font-bold">
+                      {(p.sacrifice_outcomes + p.lock_outcomes) > 0 ? `${pct}%` : "—"}
+                    </td>
+                    <td className="py-1.5 px-2">
+                      <SacrificeRateBar rate={p.sacrifice_rate} fires={p.triple_lock_fires} />
+                    </td>
+                    <td className="text-right py-1.5 pl-2">
+                      {status === "danger" && <span className="flex items-center gap-1 text-red-400 text-[10px] font-bold justify-end"><Skull size={9} />SACRIFICE</span>}
+                      {status === "warning" && <span className="text-warning text-[10px]">WATCH</span>}
+                      {status === "neutral" && <span className="text-muted text-[10px]">normal</span>}
+                      {status === "new" && <span className="text-muted text-[10px]">—</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <p className="text-[10px] text-muted mt-1.5">
+            Auto-flip triggers when ≥2 signals show ≥60% sacrifice rate with ≥3 triple lock observations.
+          </p>
+        </div>
+      )}
+
+      {!hasPatterns && (
+        <p className="text-[10px] text-muted opacity-60">
+          No sacrifice pattern data yet. Settle more Triple Lock bets to build the sacrifice database.
+        </p>
+      )}
     </div>
   );
 }
@@ -91,7 +255,6 @@ function BotCard({ bot, stats }: { bot: BotId; stats: BotStats }) {
 
   return (
     <div className={`card border ${colorClass} mb-4`}>
-      {/* Bot header */}
       <button
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center justify-between mb-3"
@@ -111,6 +274,12 @@ function BotCard({ bot, stats }: { bot: BotId; stats: BotStats }) {
           <span className={`text-xs font-mono ${stats.avgClv > 0 ? "text-success" : stats.avgClv < 0 ? "text-danger" : "text-muted"}`}>
             CLV {stats.avgClv > 0 ? "+" : ""}{stats.avgClv.toFixed(1)}%
           </span>
+          {stats.sacrifice.sacrificeLocksPlaced > 0 && (
+            <span className="flex items-center gap-1 text-red-400 text-[10px]">
+              <Skull size={9} />
+              {stats.sacrifice.sacrificeLocksPlaced} flips ({Math.round(stats.sacrifice.sacrificeLockWinRate * 100)}%)
+            </span>
+          )}
           <span className="text-muted">{expanded ? "▲" : "▼"}</span>
         </div>
       </button>
@@ -179,8 +348,11 @@ function BotCard({ bot, stats }: { bot: BotId; stats: BotStats }) {
             </div>
           )}
 
+          {/* Sacrifice section */}
+          <SacrificeSection sacrifice={stats.sacrifice} colorClass={colorClass} />
+
           {stats.lastFeedback && (
-            <p className="text-[10px] text-muted mt-2">
+            <p className="text-[10px] text-muted mt-3">
               Last updated: {new Date(stats.lastFeedback).toLocaleString("en-US", {
                 month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true,
               })}
@@ -235,7 +407,7 @@ export default function PerformancePage() {
               Bot Performance
             </h1>
             <p className="text-xs text-muted/70">
-              Signal weights auto-update after each settlement. Proven patterns are injected into bot prompts.
+              Signal weights auto-update after settlement. Proven patterns inject into prompts. Sacrifice detection auto-flips Triple Lock losses.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -260,9 +432,7 @@ export default function PerformancePage() {
           </div>
         </div>
 
-        {error && (
-          <div className="text-xs text-danger mb-4">{error}</div>
-        )}
+        {error && <div className="text-xs text-danger mb-4">{error}</div>}
 
         {loading && !data && (
           <div className="flex items-center justify-center py-24 text-muted text-sm">
@@ -278,6 +448,7 @@ export default function PerformancePage() {
                 const s = data.bots[bot];
                 const decided = s.wins + s.losses;
                 const winPct = decided > 0 ? Math.round((s.wins / decided) * 100) : 0;
+                const hasFlips = s.sacrifice.sacrificeLocksPlaced > 0;
                 return (
                   <div key={bot} className={`card border text-center ${BOT_COLORS[bot]}`}>
                     <div className="text-[10px] uppercase tracking-wider opacity-70 mb-1">Bot {bot}</div>
@@ -286,31 +457,38 @@ export default function PerformancePage() {
                     <div className={`text-[10px] font-mono mt-1 ${s.avgClv > 0 ? "text-success" : s.avgClv < 0 ? "text-danger" : "text-muted"}`}>
                       CLV {s.avgClv > 0 ? "+" : ""}{s.avgClv.toFixed(1)}%
                     </div>
+                    {hasFlips && (
+                      <div className="text-[10px] text-red-400 mt-1 flex items-center justify-center gap-1">
+                        <Skull size={9} />
+                        {Math.round(s.sacrifice.sacrificeLockWinRate * 100)}% flip rate
+                      </div>
+                    )}
                   </div>
                 );
               })}
             </div>
 
-            {/* Per-bot signal tables */}
+            {/* Per-bot cards */}
             {(["A", "B", "C", "D"] as BotId[]).map((bot) => (
               <BotCard key={bot} bot={bot} stats={data.bots[bot]} />
             ))}
 
             {/* Legend */}
             <div className="card mt-4">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted mb-2">Legend</p>
-              <div className="flex flex-wrap gap-4 text-[10px] text-muted">
-                <span><span className="text-warning font-bold">🔥 HOT</span> — Win% ≥ 62% (min 5 bets)</span>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted mb-2">Signal Legend</p>
+              <div className="flex flex-wrap gap-4 text-[10px] text-muted mb-3">
+                <span><span className="text-warning font-bold">🔥 HOT</span> — Win% ≥62% (min 5 bets)</span>
                 <span><span className="text-success">↑ WARM</span> — Win% 54-61%</span>
                 <span><span className="text-muted">— FLAT</span> — Win% 45-53%</span>
                 <span><span className="text-danger">↓ COLD</span> — Win% 37-44%</span>
-                <span><span className="text-blue-400 font-bold">❄ DEAD</span> — Win% ≤ 36%</span>
-                <span><span className="text-muted">— new</span> — &lt;5 bets fired</span>
+                <span><span className="text-blue-400 font-bold">❄ DEAD</span> — Win% ≤36%</span>
               </div>
-              <p className="text-[10px] text-muted mt-2">
-                <strong className="text-text">Score</strong> = win_rate × (1 + avg_clv/100).
-                Top 5 signals per bot (min 5 fires) are injected into Claude prompts as proven patterns.
-              </p>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted mb-2">Sacrifice Legend</p>
+              <div className="flex flex-wrap gap-4 text-[10px] text-muted">
+                <span><span className="text-red-400 font-bold">💀 SACRIFICE</span> — ≥65% of TL bets with this signal lost (≥3 games)</span>
+                <span><span className="text-warning">WATCH</span> — 55-64% sacrifice rate</span>
+                <span className="text-muted">Auto-flip triggers when ≥2 signals hit ≥60% sacrifice rate</span>
+              </div>
             </div>
           </>
         )}

@@ -13,10 +13,11 @@ const LOCK_MAP: Record<string, LockType> = {
 };
 
 const AUTO_BET_MAP: Record<LockType, keyof GematriaSettings | null> = {
-  triple_lock: "auto_bet_triple_locks",
-  double_lock: "auto_bet_double_locks",
-  single_lock: "auto_bet_single_locks",
-  no_lock: null,
+  triple_lock:    "auto_bet_triple_locks",
+  double_lock:    "auto_bet_double_locks",
+  single_lock:    "auto_bet_single_locks",
+  sacrifice_lock: "auto_bet_triple_locks",
+  no_lock:        null,
 };
 
 export async function GET() {
