@@ -67,5 +67,6 @@ export function profitLossForSettledTrade(
 ): number {
   if (result === "push" || result === "void") return 0;
   if (result === "loss") return -trade.stake;
-  return calculatePayout(trade.stake, trade.odds ?? 0);
+  if (!trade.odds) return 0; // no odds recorded — can't compute payout
+  return calculatePayout(trade.stake, trade.odds);
 }

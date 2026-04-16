@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server'
 import { getTodayET } from '@/lib/date-utils'
-import { fetchNBAGames, fetchNHLGames, fetchMLBGames } from '@/lib/sports-api'
+import {
+  fetchNBAGames, fetchNHLGames, fetchMLBGames,
+  fetchNBAGameById, fetchMLBGameById, fetchNHLGameById,
+} from '@/lib/sports-api'
 import type { ESPNGame, NHLGame } from '@/lib/sports-api'
 import { determineTradeResult, profitLossForSettledTrade } from '@/lib/settlement'
 import { getSupabaseAdmin } from '@/lib/supabase-server'
@@ -139,6 +142,34 @@ export async function POST() {
       for (const [id, s] of extractScoresFromNhl(nhl)) scoreMap.set(id, s)
       for (const [id, s] of extractScoresFromEspn(mlb)) scoreMap.set(id, s)
     }
+
+    // ── Fallback: per-game lookup for any IDs missing from the scoreboard ────
+    // ESPN's scoreboard endpoint can omit games (pagination / date boundaries).
+    // For each pending trade whose game_id wasn't returned, fetch it directly.
+    const missingIds = pendingTrades
+      .filter((t) => !scoreMap.has(t.game_id))
+      .reduce((acc, t) => {
+        const league: string = (t.game as any)?.league ?? ''
+        if (!acc.has(t.game_id)) acc.set(t.game_id, league)
+        return acc
+      }, new Map<string, string>())
+
+    await Promise.all(
+      [...missingIds.entries()].map(async ([gameId, league]) => {
+        let game: { homeScore: number; awayScore: number; status: string } | null = null
+        if (league === 'NBA') {
+          const g = await fetchNBAGameById(gameId).catch(() => null)
+          if (g) game = { homeScore: g.homeTeam.score, awayScore: g.awayTeam.score, status: g.status }
+        } else if (league === 'MLB') {
+          const g = await fetchMLBGameById(gameId).catch(() => null)
+          if (g) game = { homeScore: g.homeTeam.score, awayScore: g.awayTeam.score, status: g.status }
+        } else if (league === 'NHL') {
+          const g = await fetchNHLGameById(gameId).catch(() => null)
+          if (g) game = { homeScore: g.homeTeam.score, awayScore: g.awayTeam.score, status: g.status }
+        }
+        if (game) scoreMap.set(gameId, game)
+      })
+    )
 
     // ── Settle final games ───────────────────────────────────────────────────
     let settled = 0, wins = 0, losses = 0, pushes = 0, totalPL = 0

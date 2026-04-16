@@ -291,3 +291,99 @@ export async function fetchNHLGames(dateStr: string, standingsMap?: NhlStandings
   }
   return games
 }
+
+// ── Per-game fallback lookups ────────────────────────────────────────────────
+// ESPN's scoreboard endpoint sometimes omits games (pagination / date edge
+// cases). When a game_id isn't found in the scoreboard result, call these
+// to fetch a single event directly.
+
+function parseEspnSummaryEvent(data: any, sportPath: string): ESPNGame | null {
+  const ev = data?.gamepackageJSON?.header?.competitions?.[0] ?? data?.header?.competitions?.[0]
+  if (!ev) return null
+  const home = ev.competitors?.find((c: any) => c.homeAway === 'home')
+  const away = ev.competitors?.find((c: any) => c.homeAway === 'away')
+  const status = ev.status
+  return {
+    id: String(ev.id ?? ''),
+    date: '',
+    startTime: ev.startDate ?? '',
+    status: status?.type?.state === 'pre' ? 'pre' : status?.type?.state === 'in' ? 'in' : 'post',
+    period: status?.period || 0,
+    clock: status?.displayClock || '',
+    homeTeam: {
+      id: home?.team?.id || '',
+      name: home?.team?.displayName || '',
+      abbreviation: home?.team?.abbreviation || '',
+      score: parseEspnCompetitorScore(home?.score),
+      record: '',
+      wins: 0,
+      losses: 0,
+    },
+    awayTeam: {
+      id: away?.team?.id || '',
+      name: away?.team?.displayName || '',
+      abbreviation: away?.team?.abbreviation || '',
+      score: parseEspnCompetitorScore(away?.score),
+      record: '',
+      wins: 0,
+      losses: 0,
+    },
+    venue: { name: '', city: '', state: '' },
+  }
+}
+
+export async function fetchNBAGameById(eventId: string): Promise<ESPNGame | null> {
+  try {
+    const res = await fetchWithRetry(`${ESPN_BASE}/basketball/nba/summary?event=${eventId}`)
+    return parseEspnSummaryEvent(await res.json(), 'nba')
+  } catch { return null }
+}
+
+export async function fetchMLBGameById(eventId: string): Promise<ESPNGame | null> {
+  try {
+    const res = await fetchWithRetry(`${ESPN_BASE}/baseball/mlb/summary?event=${eventId}`)
+    return parseEspnSummaryEvent(await res.json(), 'mlb')
+  } catch { return null }
+}
+
+export async function fetchNHLGameById(gameId: string): Promise<NHLGame | null> {
+  try {
+    const res = await fetchWithRetry(`${NHL_BASE}/gamecenter/${gameId}/boxscore`)
+    const g = await res.json()
+    const state = g.gameState ?? ''
+    const status: NHLGame['status'] =
+      state === 'FUT' || state === 'PRE' ? 'pre' :
+      state === 'LIVE' || state === 'CRIT' ? 'in' : 'post'
+    const home = g.homeTeam
+    const away = g.awayTeam
+    return {
+      id: String(g.id ?? gameId),
+      date: '',
+      startTime: g.startTimeUTC ?? '',
+      status,
+      period: g.periodDescriptor?.number || 0,
+      clock: g.clock?.timeRemaining || '',
+      homeTeam: {
+        id: String(home?.id ?? ''),
+        name: home?.name?.default ?? '',
+        abbreviation: home?.abbrev ?? '',
+        score: home?.score ?? 0,
+        record: '',
+        wins: 0,
+        losses: 0,
+        otLosses: 0,
+      },
+      awayTeam: {
+        id: String(away?.id ?? ''),
+        name: away?.name?.default ?? '',
+        abbreviation: away?.abbrev ?? '',
+        score: away?.score ?? 0,
+        record: '',
+        wins: 0,
+        losses: 0,
+        otLosses: 0,
+      },
+      venue: { name: g.venue?.default ?? '', city: '' },
+    }
+  } catch { return null }
+}
