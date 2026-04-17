@@ -56,7 +56,8 @@ export async function fetchOddsForLeague(league: string): Promise<OddsApiGame[]>
   if (!sportKey) return []
 
   try {
-    // NOTE: The Odds API gateway drops x-api-key headers — key must be a query param
+    // NOTE: api.the-odds-api.com AWS gateway strips x-api-key headers.
+    // Key must be sent as ?apiKey= query param — confirmed via curl testing.
     const params = new URLSearchParams({
       apiKey,
       regions: 'us',
