@@ -50,7 +50,9 @@ async function run() {
   console.log(`Key:    ${apiKey.slice(0, 8)}${'*'.repeat(Math.max(0, apiKey.length - 8))} (${apiKey.length} chars)`)
   console.log(`League: ${league}  |  Sport: ${sportKey}\n`)
 
+  // NOTE: The Odds API gateway drops x-api-key headers — key must be a query param
   const params = new URLSearchParams({
+    apiKey,
     regions: 'us',
     markets: 'h2h,totals',
     bookmakers: BOOK_KEYS.join(','),
@@ -60,7 +62,7 @@ async function run() {
 
   let res
   try {
-    res = await fetch(url, { headers: { 'x-api-key': apiKey } })
+    res = await fetch(url)
   } catch (e) {
     console.error('Network error:', e.message)
     process.exit(1)
