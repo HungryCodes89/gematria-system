@@ -1,6 +1,12 @@
-// The Odds API v4 integration — live sportsbook lines for NBA/NHL/MLB
+// theoddsapi.com integration — live sportsbook lines for NBA/NHL/MLB
+//
+// Base URL:  https://api.theoddsapi.com
+// Auth:      x-api-key header
+// Endpoint:  GET /odds/?sport_key={key}
+// Response:  { success, data: [{ event_id, home_team, away_team, start_time,
+//              books: [{ book, market, outcomes: [{name, price, point?}] }] }] }
 
-const ODDS_API_BASE = 'https://api.the-odds-api.com/v4'
+const ODDS_API_BASE = 'https://api.theoddsapi.com'
 
 const SPORT_KEYS: Record<string, string> = {
   NBA: 'basketball_nba',
@@ -8,16 +14,19 @@ const SPORT_KEYS: Record<string, string> = {
   MLB: 'baseball_mlb',
 }
 
-// Book keys used in the API request
-const BOOK_KEYS = ['pinnacle', 'draftkings', 'fanduel', 'betmgm', 'williamhill_us']
-
-// Human-readable labels for display
+// Human-readable labels for the books this API returns
 export const BOOK_LABELS: Record<string, string> = {
-  pinnacle: 'Pinnacle',
-  draftkings: 'DraftKings',
-  fanduel: 'FanDuel',
-  betmgm: 'BetMGM',
-  williamhill_us: 'Caesars',
+  draftkings:    'DraftKings',
+  fanduel:       'FanDuel',
+  betmgm:        'BetMGM',
+  williamhill_us:'Caesars',
+  lowvig:        'LowVig',
+  betonlineag:   'BetOnline',
+  bovada:        'Bovada',
+  betrivers:     'BetRivers',
+  fanatics:      'Fanatics',
+  mybookieag:    'MyBookie',
+  betus:         'BetUS',
 }
 
 export interface BookOddsLine {
@@ -33,7 +42,7 @@ export interface OddsApiGame {
   homeTeam: string
   awayTeam: string
   commenceTime: string
-  /** Per-book lines keyed by human label (e.g. "Pinnacle", "DraftKings") */
+  /** Per-book lines keyed by human label (e.g. "LowVig", "DraftKings") */
   books: Record<string, BookOddsLine>
   /** Best (highest payout) available moneyline for home across all books */
   bestMoneylineHome: number | null
@@ -56,17 +65,11 @@ export async function fetchOddsForLeague(league: string): Promise<OddsApiGame[]>
   if (!sportKey) return []
 
   try {
-    // NOTE: api.the-odds-api.com AWS gateway strips x-api-key headers.
-    // Key must be sent as ?apiKey= query param — confirmed via curl testing.
-    const params = new URLSearchParams({
-      apiKey,
-      regions: 'us',
-      markets: 'h2h,totals',
-      bookmakers: BOOK_KEYS.join(','),
-    })
+    const params = new URLSearchParams({ sport_key: sportKey })
 
-    const res = await fetch(`${ODDS_API_BASE}/sports/${sportKey}/odds/?${params}`, {
+    const res = await fetch(`${ODDS_API_BASE}/odds/?${params}`, {
       cache: 'no-store',
+      headers: { 'x-api-key': apiKey },
     })
 
     if (!res.ok) {
@@ -74,48 +77,61 @@ export async function fetchOddsForLeague(league: string): Promise<OddsApiGame[]>
       return []
     }
 
-    const data = await res.json()
+    const json = await res.json()
+
+    // Response shape: { success: boolean, data: [...] }
+    const data: unknown[] = Array.isArray(json) ? json : (json?.data ?? [])
     if (!Array.isArray(data)) return []
 
-    return data.map(parseOddsApiGame)
+    return (data as unknown[]).map((g) => parseOddsApiGame(g as Parameters<typeof parseOddsApiGame>[0]))
   } catch (e) {
     console.error(`[odds-api] ${league}:`, e)
     return []
   }
 }
 
+// ---------------------------------------------------------------------------
+// Response parser — new theoddsapi.com format
+// ---------------------------------------------------------------------------
+
 function parseOddsApiGame(g: {
-  id: string
+  event_id: string
   home_team: string
   away_team: string
-  commence_time: string
-  bookmakers?: {
-    key: string
-    title: string
-    markets?: {
-      key: string
-      outcomes?: { name: string; price: number; point?: number }[]
-    }[]
+  start_time: string
+  books?: {
+    book: string
+    market: string
+    outcomes?: { name: string; price: number; point?: number }[]
   }[]
 }): OddsApiGame {
-  const books: Record<string, BookOddsLine> = {}
+  // Each element in books[] covers one market (h2h or totals) for one bookmaker.
+  // Group by book key so we can merge h2h + totals into a single BookOddsLine.
+  const bookMap: Record<string, BookOddsLine> = {}
 
-  for (const bm of g.bookmakers ?? []) {
-    const label = BOOK_LABELS[bm.key] ?? bm.title ?? bm.key
-    const h2h = bm.markets?.find((m) => m.key === 'h2h')
-    const totals = bm.markets?.find((m) => m.key === 'totals')
+  for (const entry of g.books ?? []) {
+    const label = BOOK_LABELS[entry.book] ?? entry.book
+    if (!bookMap[label]) {
+      bookMap[label] = {
+        moneylineHome: null,
+        moneylineAway: null,
+        overUnderLine: null,
+        overOdds: null,
+        underOdds: null,
+      }
+    }
 
-    const homeOutcome = h2h?.outcomes?.find((o) => o.name === g.home_team)
-    const awayOutcome = h2h?.outcomes?.find((o) => o.name === g.away_team)
-    const overOutcome = totals?.outcomes?.find((o) => o.name === 'Over')
-    const underOutcome = totals?.outcomes?.find((o) => o.name === 'Under')
-
-    books[label] = {
-      moneylineHome: homeOutcome?.price ?? null,
-      moneylineAway: awayOutcome?.price ?? null,
-      overUnderLine: overOutcome?.point ?? underOutcome?.point ?? null,
-      overOdds: overOutcome?.price ?? null,
-      underOdds: underOutcome?.price ?? null,
+    if (entry.market === 'h2h') {
+      bookMap[label]!.moneylineHome =
+        entry.outcomes?.find((o) => o.name === g.home_team)?.price ?? null
+      bookMap[label]!.moneylineAway =
+        entry.outcomes?.find((o) => o.name === g.away_team)?.price ?? null
+    } else if (entry.market === 'totals' || entry.market === 'spreads') {
+      const over = entry.outcomes?.find((o) => o.name === 'Over')
+      const under = entry.outcomes?.find((o) => o.name === 'Under')
+      bookMap[label]!.overUnderLine = over?.point ?? under?.point ?? null
+      bookMap[label]!.overOdds = over?.price ?? null
+      bookMap[label]!.underOdds = under?.price ?? null
     }
   }
 
@@ -128,7 +144,7 @@ function parseOddsApiGame(g: {
   let bestUnderOdds: number | null = null
   let bestOverLine: number | null = null
 
-  for (const [name, line] of Object.entries(books)) {
+  for (const [name, line] of Object.entries(bookMap)) {
     if (line.moneylineHome != null && (bestHome === null || line.moneylineHome > bestHome)) {
       bestHome = line.moneylineHome
       bestHomeBook = name
@@ -147,11 +163,11 @@ function parseOddsApiGame(g: {
   }
 
   return {
-    id: g.id,
+    id: g.event_id,
     homeTeam: g.home_team,
     awayTeam: g.away_team,
-    commenceTime: g.commence_time,
-    books,
+    commenceTime: g.start_time,
+    books: bookMap,
     bestMoneylineHome: bestHome,
     bestMoneylineAway: bestAway,
     bestBookHome: bestHomeBook,
@@ -162,6 +178,10 @@ function parseOddsApiGame(g: {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Fuzzy game matching
+// ---------------------------------------------------------------------------
+
 function norm(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]/g, '')
 }
@@ -169,6 +189,37 @@ function norm(s: string): string {
 function lastWord(s: string): string {
   const words = s.trim().split(/\s+/)
   return (words[words.length - 1] ?? '').toLowerCase().replace(/[^a-z]/g, '')
+}
+
+/** Fuzzy match an OddsApi game to DB home/away team names */
+export function matchOddsApiGame(
+  oddsGames: OddsApiGame[],
+  homeTeam: string,
+  awayTeam: string,
+): OddsApiGame | null {
+  const homeNorm = norm(homeTeam)
+  const awayNorm = norm(awayTeam)
+  const homeLast = lastWord(homeTeam)
+  const awayLast = lastWord(awayTeam)
+
+  for (const g of oddsGames) {
+    const hNorm = norm(g.homeTeam)
+    const aNorm = norm(g.awayTeam)
+
+    // Substring match in either direction
+    if (
+      (hNorm.includes(homeNorm) || homeNorm.includes(hNorm)) &&
+      (aNorm.includes(awayNorm) || awayNorm.includes(aNorm))
+    ) {
+      return g
+    }
+
+    // Mascot name (last word) match
+    if (lastWord(g.homeTeam) === homeLast && lastWord(g.awayTeam) === awayLast) {
+      return g
+    }
+  }
+  return null
 }
 
 // ---------------------------------------------------------------------------
@@ -201,7 +252,7 @@ function americanToImplied(odds: number): number {
 
 /**
  * Vig = (impliedHome + impliedAway) - 1.
- * Lower vig = sharper book (Pinnacle is typically ~1-2%, recreational is 5-10%).
+ * Lower vig = sharper book. LowVig is typically ~1%, recreational books ~7-10%.
  */
 function bookVig(line: BookOddsLine): number | null {
   if (line.moneylineHome == null || line.moneylineAway == null) return null
@@ -214,51 +265,43 @@ const SHARP_ML_THRESHOLD = 0.03
 /**
  * Detect sharp money action from the full books map.
  *
- * Strategy:
- *  1. If Pinnacle is present, use it as the sharp reference (best market maker).
- *  2. Otherwise, rank all books by vig and pick the lowest-vig as sharp reference
- *     and the highest-vig as the soft reference.
- *  3. A 3%+ implied probability gap (or 0.5+ O/U gap) triggers SHARP.
- *
- * Logs which book pair was used so the UI/prompt can name them correctly.
+ * Ranks all books by vig (lowest = sharpest, highest = softest).
+ * LowVig is the primary sharp reference when Pinnacle isn't available.
+ * A 3%+ implied-probability gap or 0.5+ O/U point gap triggers SHARP.
  */
 export function calculateSharpData(
   books: Record<string, BookOddsLine> | null | undefined,
 ): SharpData | null {
   if (!books || Object.keys(books).length < 2) return null
 
-  // Build a ranked list: [bookName, line, vig] sorted by vig ascending (sharpest first)
   const ranked: Array<{ name: string; line: BookOddsLine; vig: number }> = []
   for (const [name, line] of Object.entries(books)) {
     const v = bookVig(line)
     if (v != null) ranked.push({ name, line, vig: v })
   }
   if (ranked.length < 2) return null
-  ranked.sort((a, b) => a.vig - b.vig)
+  ranked.sort((a, b) => a.vig - b.vig) // ascending = sharpest first
 
-  // Prefer Pinnacle as sharp reference if it's present and has lines
-  const pinnacleEntry = ranked.find((r) => r.name === 'Pinnacle')
-  const sharpEntry = pinnacleEntry ?? ranked[0]!
-  // Soft reference: highest vig book, must not be the same as sharp
-  const softEntry = ranked[ranked.length - 1]!.name === sharpEntry.name
-    ? ranked[ranked.length - 2]!
-    : ranked[ranked.length - 1]!
+  // Prefer Pinnacle if present, otherwise lowest-vig book (typically LowVig)
+  const sharpEntry = ranked.find((r) => r.name === 'Pinnacle') ?? ranked[0]!
+  // Soft reference: highest-vig book that isn't the sharp reference
+  const softEntry =
+    ranked[ranked.length - 1]!.name === sharpEntry.name
+      ? ranked[ranked.length - 2]!
+      : ranked[ranked.length - 1]!
 
   if (!sharpEntry || !softEntry) return null
 
   const sharpLine = sharpEntry.line
   const softLine = softEntry.line
 
-  const sharpHome = sharpLine.moneylineHome != null ? americanToImplied(sharpLine.moneylineHome) : null
-  const sharpAway = sharpLine.moneylineAway != null ? americanToImplied(sharpLine.moneylineAway) : null
-  const softHome = softLine.moneylineHome != null ? americanToImplied(softLine.moneylineHome) : null
-  const softAway = softLine.moneylineAway != null ? americanToImplied(softLine.moneylineAway) : null
+  const sharpH = sharpLine.moneylineHome != null ? americanToImplied(sharpLine.moneylineHome) : null
+  const sharpA = sharpLine.moneylineAway != null ? americanToImplied(sharpLine.moneylineAway) : null
+  const softH = softLine.moneylineHome != null ? americanToImplied(softLine.moneylineHome) : null
+  const softA = softLine.moneylineAway != null ? americanToImplied(softLine.moneylineAway) : null
 
-  const mlGapHome = sharpHome != null && softHome != null ? sharpHome - softHome : null
-  const mlGapAway = sharpAway != null && softAway != null ? sharpAway - softAway : null
-
-  const isSharpHome = mlGapHome != null && mlGapHome > SHARP_ML_THRESHOLD
-  const isSharpAway = mlGapAway != null && mlGapAway > SHARP_ML_THRESHOLD
+  const mlGapHome = sharpH != null && softH != null ? sharpH - softH : null
+  const mlGapAway = sharpA != null && softA != null ? sharpA - softA : null
 
   const ouGap =
     sharpLine.overUnderLine != null && softLine.overUnderLine != null
@@ -271,49 +314,17 @@ export function calculateSharpData(
   const r1 = (n: number | null) => (n != null ? Math.round(n * 10) / 10 : null)
 
   return {
-    sharpHome: isSharpHome,
-    sharpAway: isSharpAway,
+    sharpHome: mlGapHome != null && mlGapHome > SHARP_ML_THRESHOLD,
+    sharpAway: mlGapAway != null && mlGapAway > SHARP_ML_THRESHOLD,
     sharpOU,
     sharpBook: sharpEntry.name,
     softBook: softEntry.name,
-    // Keep field names stable for existing consumers — "pinnacle" slot = sharp ref
-    pinnacleImpliedHome: r3(sharpHome),
-    pinnacleImpliedAway: r3(sharpAway),
-    dkImpliedHome: r3(softHome),
-    dkImpliedAway: r3(softAway),
+    pinnacleImpliedHome: r3(sharpH),
+    pinnacleImpliedAway: r3(sharpA),
+    dkImpliedHome: r3(softH),
+    dkImpliedAway: r3(softA),
     mlGapHome: r3(mlGapHome),
     mlGapAway: r3(mlGapAway),
     ouGap: r1(ouGap),
   }
-}
-
-/** Fuzzy match an OddsApi game to DB home/away team names */
-export function matchOddsApiGame(
-  oddsGames: OddsApiGame[],
-  homeTeam: string,
-  awayTeam: string,
-): OddsApiGame | null {
-  const homeNorm = norm(homeTeam)
-  const awayNorm = norm(awayTeam)
-  const homeLast = lastWord(homeTeam)
-  const awayLast = lastWord(awayTeam)
-
-  for (const g of oddsGames) {
-    const hNorm = norm(g.homeTeam)
-    const aNorm = norm(g.awayTeam)
-
-    // Substring match in either direction
-    if (
-      (hNorm.includes(homeNorm) || homeNorm.includes(hNorm)) &&
-      (aNorm.includes(awayNorm) || awayNorm.includes(aNorm))
-    ) {
-      return g
-    }
-
-    // Mascot name (last word) match
-    if (lastWord(g.homeTeam) === homeLast && lastWord(g.awayTeam) === awayLast) {
-      return g
-    }
-  }
-  return null
 }
