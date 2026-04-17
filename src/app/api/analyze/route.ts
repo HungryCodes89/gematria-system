@@ -89,7 +89,9 @@ async function placeBots(
     };
 
     if (decision.action !== "bet") {
-      logs.push({ ...base, placed: false, skipReason: "Claude returned action=skip" });
+      const reason = "Claude returned action=skip";
+      console.log(`[placeBots] Bot ${bot} [${idx}] SKIP — ${reason} | pick=${decision.pick} conf=${decision.confidence}`);
+      logs.push({ ...base, placed: false, skipReason: reason });
       continue;
     }
 
@@ -103,22 +105,32 @@ async function placeBots(
           ? analysis.lockType
           : confidenceToLockType(decision.confidence);
 
+    console.log(`[placeBots] Bot ${bot} [${idx}] action=bet pick="${decision.pick}" conf=${decision.confidence}% effectiveLock=${effectiveLockType}`);
+
     const autoBetKey = AUTO_BET_MAP[effectiveLockType];
     if (!autoBetKey) {
-      logs.push({ ...base, placed: false, skipReason: `${bot === "A" ? "Engine" : "Claude"}: ${effectiveLockType} — no auto-bet for no_lock` });
+      const reason = `${bot === "A" ? "Engine" : "Claude"}: ${effectiveLockType} — no auto-bet for no_lock`;
+      console.log(`[placeBots] Bot ${bot} [${idx}] SKIP — ${reason}`);
+      logs.push({ ...base, placed: false, skipReason: reason });
       continue;
     }
     if (!settings[autoBetKey]) {
-      logs.push({ ...base, placed: false, skipReason: `Auto-bet disabled for ${effectiveLockType} (settings.${autoBetKey}=false)` });
+      const reason = `Auto-bet disabled for ${effectiveLockType} (settings.${autoBetKey}=false)`;
+      console.log(`[placeBots] Bot ${bot} [${idx}] SKIP — ${reason}`);
+      logs.push({ ...base, placed: false, skipReason: reason });
       continue;
     }
     if (decision.confidence < settings.min_confidence) {
-      logs.push({ ...base, placed: false, skipReason: `Claude confidence ${decision.confidence}% < min_confidence ${settings.min_confidence}%` });
+      const reason = `Claude confidence ${decision.confidence}% < min_confidence ${settings.min_confidence}%`;
+      console.log(`[placeBots] Bot ${bot} [${idx}] SKIP — ${reason}`);
+      logs.push({ ...base, placed: false, skipReason: reason });
       continue;
     }
     if (!canPlaceBet(state.balance, state.dailyUnits, decision.units, settings)) {
       const stake = calculateStake(decision.units, settings.unit_size);
-      logs.push({ ...base, placed: false, skipReason: `Limit hit: balance=$${state.balance} stake=$${stake} dailyUnits=${state.dailyUnits}/${settings.max_daily_units}` });
+      const reason = `Limit hit: balance=$${state.balance} stake=$${stake} dailyUnits=${state.dailyUnits}/${settings.max_daily_units}`;
+      console.log(`[placeBots] Bot ${bot} [${idx}] SKIP — ${reason}`);
+      logs.push({ ...base, placed: false, skipReason: reason });
       continue;
     }
 
@@ -160,8 +172,12 @@ async function placeBots(
       state.dailyUnits += decision.units;
       state.betsPlaced++;
       state.gameIds.add(game.id);
+      console.log(`[placeBots] Bot ${bot} [${idx}] PLACED — ${decision.pick} ${decision.units}u @ ${decision.odds} lock=${effectiveLockType}`);
       logs.push({ ...base, placed: true });
     } else {
+      // Constraint violation (e.g. bot CHECK only allows A/B) shows up here
+      console.error(`[placeBots] Bot ${bot} DB INSERT FAILED for game ${game.id}: ${insertErr.message}`);
+      console.error(`[placeBots] If error mentions 'bot_check' constraint run: ALTER TABLE paper_trades DROP CONSTRAINT paper_trades_bot_check; ALTER TABLE paper_trades ADD CONSTRAINT paper_trades_bot_check CHECK (bot IN ('A','B','C','D'));`);
       logs.push({ ...base, placed: false, skipReason: "DB insert failed", dbError: insertErr.message });
     }
   }
@@ -231,6 +247,8 @@ export async function POST(req: NextRequest) {
   const { data: games } = await gamesQuery;
   const unanalyzed: Game[] = (games ?? []) as Game[];
   console.log(`[analyze] runA=${runA} runB=${runB} runC=${runC} runD=${runD} games=${unanalyzed.length} bot=${botParam}`);
+  console.log(`[analyze] runD gate: botParam=${botParam} bot_d_prompt_set=${Boolean(settings.bot_d_system_prompt)} (${(settings.bot_d_system_prompt ?? "").length} chars)`);
+  console.log(`[analyze] settings: min_confidence=${settings.min_confidence} triple=${settings.auto_bet_triple_locks} double=${settings.auto_bet_double_locks} single=${settings.auto_bet_single_locks}`);
 
   // Fetch today's decode notes once and inject into all bot prompts
   const { data: notesRow } = await supabase
@@ -437,10 +455,16 @@ export async function POST(req: NextRequest) {
           if (runD && !skipD) {
             console.log(`[analyze] Bot D analyzing ${game.away_team} @ ${game.home_team}`);
             const { analysis, decisions } = await analyzeGameWithClaude(game, botDSettings, "D", todayNotes, matchedPatterns, provenPatternsD.length > 0 ? provenPatternsD : undefined, sacrificePatternsD.length > 0 ? sacrificePatternsD : undefined);
+            console.log(`[bot-D] lockType=${analysis.lockType} engineConf=${analysis.confidence}% decisions=${decisions.length}`);
+            decisions.forEach((d, i) => {
+              console.log(`[bot-D] decision[${i}] action=${d.action} pick="${d.pick}" conf=${d.confidence}% odds=${d.odds} units=${d.units} effectiveLock=${confidenceToLockType(d.confidence)}`);
+            });
             analysisD = analysis;
             logsD = await placeBots(supabase, game, decisions, analysis, "D", settings, botDState);
           } else if (skipD) {
             console.log(`[analyze] Bot D skip — already bet game ${game.id}`);
+          } else if (!runD) {
+            console.log(`[analyze] Bot D disabled — botParam=${botParam} bot_d_prompt_set=${Boolean(settings.bot_d_system_prompt)}`);
           }
 
           const primaryAnalysis = analysisA ?? analysisB ?? analysisC ?? analysisD;

@@ -602,7 +602,16 @@ export async function analyzeGameWithClaude(
     throw new Error("Claude returned no text content");
   }
 
+  if (bot === "D") {
+    // Log raw response so we can see exactly what Claude returns for Bot D
+    console.log(`[claude-agent] Bot D raw response (${textBlock.text.length} chars): ${textBlock.text.substring(0, 800)}`);
+  }
+
   const decisions = robustJsonParse(textBlock.text);
+
+  if (bot === "D") {
+    console.log(`[claude-agent] Bot D parsed ${decisions.length} decision(s): ${JSON.stringify(decisions.map(d => ({ action: d.action, pick: d.pick, confidence: d.confidence, odds: d.odds })))}`);
+  }
 
   return { analysis: analysisResult, decisions };
 }
