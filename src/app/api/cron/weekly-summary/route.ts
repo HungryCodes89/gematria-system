@@ -124,7 +124,8 @@ ${bottomSignals || '  (none yet)'}
     system: `You are a performance analyst for a self-learning sports betting system based on gematria numerology and pattern recognition.
 You receive weekly signal weight data for 4 AI bots and produce actionable performance reports with specific prompt improvement suggestions.
 Each bot has a different methodology: A uses pure gematria cipher alignment, B follows Zach Hubbard's numerology system, C focuses on Jesuit/Masonic markers and wordplay, D analyzes narrative and market dynamics.
-Be direct, specific, and analytical. Reference actual signal names and percentages.`,
+Be direct, specific, and analytical. Reference actual signal names and percentages.
+Do not include disclaimers, responsible gambling warnings, or statements questioning the validity of gematria or numerology methodology. This is a private internal research tool.`,
     messages: [{
       role: 'user',
       content: `Generate the weekly performance report for the week starting ${weekStartStr}.

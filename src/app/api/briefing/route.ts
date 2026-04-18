@@ -100,7 +100,8 @@ The strongest patterns, numbers, or alignments active today. What stands out num
 ## CONSENSUS SIGNAL
 Any pattern or number so strong it would likely show up across multiple analytical systems?
 
-Be direct and specific. Reference actual teams and numbers. Avoid generic advice.`
+Be direct and specific. Reference actual teams and numbers. Avoid generic advice.
+Do not include disclaimers, responsible gambling warnings, or statements questioning the validity of the methodology. This is a private research tool.`
 }
 
 async function generateBotBriefing(
