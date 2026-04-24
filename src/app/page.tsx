@@ -7,7 +7,6 @@ import {
   Sparkles,
   CheckCircle,
   Moon,
-  Filter,
   PenLine,
   BookOpen,
   Trophy,
@@ -17,10 +16,9 @@ import { calculateDateNumerology } from "@/lib/gematria";
 import { getTodayET } from "@/lib/date-utils";
 import { isFullMoon, getFullMoonName } from "@/lib/moon-phase";
 import { getMoonIllumination } from "@/lib/moon-phase";
-import type { Game, PaperTrade, DateNumerology } from "@/lib/types";
+import type { Game, PaperTrade } from "@/lib/types";
 import Nav from "@/components/Nav";
 import GameCard from "@/components/GameCard";
-import StatCard from "@/components/StatCard";
 import ManualPickModal from "@/components/ManualPickModal";
 import GameDetailModal from "@/components/GameDetailModal";
 import BriefingModal from "@/components/BriefingModal";
@@ -28,57 +26,98 @@ import BriefingModal from "@/components/BriefingModal";
 type League = "ALL" | "NBA" | "NHL" | "MLB";
 type BotSelection = "all" | "A" | "B" | "C" | "D";
 
-const BOT_LABELS: Record<BotSelection, string> = {
-  all: "All Bots",
-  A: "Bot A",
-  B: "Bot B",
-  C: "Bot C — AJ",
-  D: "Bot D — Narrative",
+const BOT_LABELS: Record<BotSelection, { short: string; method: string }> = {
+  all: { short: "ALL",    method: "ALL BOTS"       },
+  A:   { short: "A",      method: "BASIC CIPHER"   },
+  B:   { short: "B",      method: "HUBBARD 15-STEP" },
+  C:   { short: "C",      method: "STRAIT JESUIT"  },
+  D:   { short: "D",      method: "NARRATIVE SCOUT" },
 };
 
+/* Helper — reduce a number to its numerology root, preserving master numbers */
+function reduce(n: number): number {
+  while (n > 9 && n !== 11 && n !== 22 && n !== 33) {
+    n = String(n).split("").reduce((s, c) => s + Number(c), 0);
+  }
+  return n;
+}
+
+function isMasterNum(n: number) {
+  return n === 11 || n === 22 || n === 33;
+}
+
+function MasterSpan({ value }: { value: number }) {
+  return isMasterNum(value)
+    ? <span className="master-num">{value}</span>
+    : <span>{value}</span>;
+}
+
+/* Flower-of-Life tiling for the hero strip background */
+function FlowerOfLifePattern() {
+  return (
+    <svg
+      className="absolute inset-0 w-full h-full"
+      style={{ opacity: 0.06, pointerEvents: "none" }}
+      preserveAspectRatio="xMidYMid slice"
+    >
+      <defs>
+        <pattern id="fol" x="0" y="0" width="58" height="50.2" patternUnits="userSpaceOnUse">
+          <circle cx="29" cy="25.1" r="14.5" fill="none" stroke="#D4A574" strokeWidth="0.6" />
+          <circle cx="29" cy="10.6" r="14.5" fill="none" stroke="#D4A574" strokeWidth="0.6" />
+          <circle cx="29" cy="39.6" r="14.5" fill="none" stroke="#D4A574" strokeWidth="0.6" />
+          <circle cx="16.4" cy="18" r="14.5"  fill="none" stroke="#D4A574" strokeWidth="0.6" />
+          <circle cx="41.6" cy="18" r="14.5"  fill="none" stroke="#D4A574" strokeWidth="0.6" />
+          <circle cx="16.4" cy="32.2" r="14.5" fill="none" stroke="#D4A574" strokeWidth="0.6" />
+          <circle cx="41.6" cy="32.2" r="14.5" fill="none" stroke="#D4A574" strokeWidth="0.6" />
+        </pattern>
+      </defs>
+      <rect width="100%" height="100%" fill="url(#fol)" />
+    </svg>
+  );
+}
+
 export default function Dashboard() {
-  const [games, setGames] = useState<Game[]>([]);
-  const [trades, setTrades] = useState<PaperTrade[]>([]);
-  const [league, setLeague] = useState<League>("ALL");
+  const [games, setGames]         = useState<Game[]>([]);
+  const [trades, setTrades]       = useState<PaperTrade[]>([]);
+  const [league, setLeague]       = useState<League>("ALL");
   const [selectedBot, setSelectedBot] = useState<BotSelection>("all");
-  const [loading, setLoading] = useState<string | null>(null);
+  const [loading, setLoading]     = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState("");
   const [analyzeProgress, setAnalyzeProgress] = useState<{
-    current: number;
-    total: number;
-    label: string;
+    current: number; total: number; label: string;
   } | null>(null);
-  const [showManualModal, setShowManualModal] = useState(false);
-  const [selectedGame, setSelectedGame] = useState<Game | null>(null);
-  const [lastSettlement, setLastSettlement] = useState<{
-    settledAt: string;
-    betsPlaced: number | null;
-    wins: number | null;
-    losses: number | null;
-    dailyPL: number | null;
+  const [showManualModal, setShowManualModal]   = useState(false);
+  const [selectedGame, setSelectedGame]         = useState<Game | null>(null);
+  const [lastSettlement, setLastSettlement]     = useState<{
+    settledAt: string; betsPlaced: number | null;
+    wins: number | null; losses: number | null; dailyPL: number | null;
   } | null>(null);
   const [showBriefingModal, setShowBriefingModal] = useState(false);
-  const [reanalyzingId, setReanalyzingId] = useState<string | null>(null);
-  const [notes, setNotes] = useState("");
+  const [reanalyzingId, setReanalyzingId]       = useState<string | null>(null);
+  const [notes, setNotes]         = useState("");
   const [notesSaving, setNotesSaving] = useState(false);
   const notesSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const today = getTodayET();
+  const today     = getTodayET();
   const todayDate = (() => {
     const [y, m, d] = today.split("-").map(Number);
     return new Date(y, m - 1, d);
   })();
-  const numerology = calculateDateNumerology(todayDate);
-  const fullMoon = isFullMoon(today);
-  const moonName = getFullMoonName(today);
+  const numerology   = calculateDateNumerology(todayDate);
+  const fullMoon     = isFullMoon(today);
+  const moonName     = getFullMoonName(today);
   const illumination = Math.round(getMoonIllumination(todayDate) * 100);
 
   const dayName = todayDate.toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    year: "numeric",
+    weekday: "long", month: "long", day: "numeric", year: "numeric",
   });
+
+  /* ── Hero strip values ── */
+  const [yrStr, moStr, dyStr] = today.split("-");
+  const heroDate = `${moStr}.${dyStr}.${yrStr}`;
+  const numSum   = parseInt(moStr) + parseInt(dyStr) + parseInt(yrStr);
+  const dayOfYear  = numerology.dayOfYear;
+  const weekOfYear = Math.ceil((dayOfYear + new Date(todayDate.getFullYear(), 0, 1).getDay()) / 7);
 
   const loadGames = useCallback(async () => {
     try {
@@ -89,7 +128,6 @@ export default function Dashboard() {
         if (data.lastSettlement) setLastSettlement(data.lastSettlement);
       }
     } catch { /* ignore */ }
-
     try {
       const res = await fetch(`/api/fetch-games?date=${today}&readonly=1`);
       if (res.ok) {
@@ -140,7 +178,7 @@ export default function Dashboard() {
         body: JSON.stringify({ bot: selectedBot, gameId }),
       });
       if (res.body) {
-        const reader = res.body.getReader();
+        const reader  = res.body.getReader();
         const decoder = new TextDecoder();
         let buf = "";
         while (true) {
@@ -168,17 +206,22 @@ export default function Dashboard() {
     MLB: games.filter((g) => g.league === "MLB").length,
   };
   const analyzedCount = games.filter((g) => g.analyzed).length;
-  const betCount = trades.length;
+
+  /* Hero strip counts */
+  const lockCount = games.filter(g => g.lock_type === "triple_lock" || g.lock_type === "double_lock").length;
+  const leanCount = games.filter(g => g.lock_type === "single_lock").length;
+  const betsSet   = new Set(trades.filter(t => t.bet_type !== "analysis").map(t => t.game_id));
+  const passCount = games.filter(g => g.analyzed && !betsSet.has(g.id)).length;
 
   async function handleFetch() {
     setLoading("fetch");
     setStatusMsg("");
     try {
-      const res = await fetch("/api/fetch-games", { method: "POST" });
+      const res  = await fetch("/api/fetch-games", { method: "POST" });
       const data = await res.json();
       if (data.success) {
         setStatusMsg(
-          `Fetched ${data.total} games (${data.games?.nba ?? 0} NBA, ${data.games?.nhl ?? 0} NHL, ${data.games?.mlb ?? 0} MLB) with ${data.oddsMatched ?? 0} odds matched`
+          `Fetched ${data.total} games (${data.games?.nba ?? 0} NBA · ${data.games?.nhl ?? 0} NHL · ${data.games?.mlb ?? 0} MLB) · ${data.oddsMatched ?? 0} odds matched`
         );
         toast.success(`Fetched ${data.total} games`);
         loadGames();
@@ -204,20 +247,16 @@ export default function Dashboard() {
       });
       if (!res.body) {
         const data = await res.json();
-        setStatusMsg(
-          `Analyzed ${data.analyzed} games, placed ${data.betsPlaced} bets`
-        );
+        setStatusMsg(`Analyzed ${data.analyzed} games, placed ${data.betsPlaced} bets`);
         toast.success(`Placed ${data.betsPlaced} bets`);
         loadGames();
         return;
       }
-      const reader = res.body.getReader();
+      const reader  = res.body.getReader();
       const decoder = new TextDecoder();
       let buf = "";
       let lastResult: {
-        analyzed: number;
-        betsPlaced: number;
-        errors?: string[];
+        analyzed: number; betsPlaced: number; errors?: string[];
         settingsSnapshot?: Record<string, unknown>;
       } = { analyzed: 0, betsPlaced: 0 };
       const gameErrors: string[] = [];
@@ -235,11 +274,7 @@ export default function Dashboard() {
             if (ev.done) {
               lastResult = ev;
             } else if (ev.total) {
-              setAnalyzeProgress({
-                current: ev.game,
-                total: ev.total,
-                label: ev.teams || "",
-              });
+              setAnalyzeProgress({ current: ev.game, total: ev.total, label: ev.teams || "" });
             } else if (ev.status === "error") {
               gameErrors.push(`${ev.teams}: ${ev.error}`);
             }
@@ -248,30 +283,22 @@ export default function Dashboard() {
       }
 
       const allErrors = [...gameErrors, ...(lastResult.errors ?? [])];
-
-      // Build detailed status — show skip reasons if no bets placed
       if (lastResult.betsPlaced === 0 && lastResult.analyzed > 0) {
-        const snap = lastResult.settingsSnapshot as Record<string, unknown> | undefined;
+        const snap  = lastResult.settingsSnapshot as Record<string, unknown> | undefined;
         const hints: string[] = [];
-        if (allErrors.length > 0) hints.push(`${allErrors.length} Claude error(s) — check model name in Settings`);
+        if (allErrors.length > 0) hints.push(`${allErrors.length} Claude error(s)`);
         if (snap) {
           if (!snap.auto_bet_triple_locks && !snap.auto_bet_double_locks && !snap.auto_bet_single_locks)
             hints.push("All auto-bet toggles OFF");
-          else if (!snap.auto_bet_double_locks && !snap.auto_bet_single_locks)
-            hints.push("Only Triple Locks auto-bet");
-          hints.push(`Model: ${snap.model} · Min conf: ${snap.min_confidence}%`);
+          hints.push(`Model: ${snap.model}`);
         }
-        setStatusMsg(`Analyzed ${lastResult.analyzed} games — 0 bets placed. ${hints.join(" · ")}`);
-        toast.error(`0 bets placed — ${hints[0] ?? "check diagnose endpoint"}`);
+        setStatusMsg(`Analyzed ${lastResult.analyzed} games — 0 bets. ${hints.join(" · ")}`);
+        toast.error(`0 bets placed — ${hints[0] ?? "check settings"}`);
       } else {
-        setStatusMsg(`Analyzed ${lastResult.analyzed} games, placed ${lastResult.betsPlaced} bets`);
+        setStatusMsg(`Analyzed ${lastResult.analyzed} games · ${lastResult.betsPlaced} bets placed`);
         if (lastResult.betsPlaced > 0) toast.success(`Placed ${lastResult.betsPlaced} bets`);
       }
-
-      if (allErrors.length > 0) {
-        allErrors.forEach((e) => toast.error(e, { duration: 6000 }));
-      }
-
+      if (allErrors.length > 0) allErrors.forEach((e) => toast.error(e, { duration: 6000 }));
       loadGames();
     } catch (e) {
       toast.error("Analysis failed: " + String(e));
@@ -285,7 +312,7 @@ export default function Dashboard() {
     setLoading("settle");
     setStatusMsg("");
     try {
-      const res = await fetch("/api/settle", { method: "POST" });
+      const res  = await fetch("/api/settle", { method: "POST" });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Settlement failed");
       if (data.settled === 0) {
@@ -293,11 +320,11 @@ export default function Dashboard() {
       } else {
         const { wins, losses } = data.results ?? {};
         toast.success(`Settled ${data.settled} bet${data.settled !== 1 ? "s" : ""} (${wins}W-${losses}L)`);
-        setStatusMsg(`Settled ${data.settled} bets (${wins}W-${losses}L). P&L: $${data.dailyPL}`);
+        setStatusMsg(`Settled ${data.settled} bets (${wins}W-${losses}L) · P&L: $${data.dailyPL}`);
       }
       loadGames();
-    } catch (e: any) {
-      toast.error(e.message ?? "Settlement failed");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Settlement failed");
     } finally {
       setLoading(null);
     }
@@ -312,114 +339,198 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen">
       <Nav />
-      <main className="mx-auto max-w-6xl px-4 py-6">
-        {/* Date header */}
-        <div className="mb-6">
-          <h1 className="text-sm font-medium tracking-widest uppercase text-muted mb-1">
-            {dayName}
-          </h1>
-        </div>
 
-        {/* Numerology strip */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 mb-6">
-          {[
-            ["Full Date", numerology.full],
-            ["Reduced Year", numerology.reducedYear],
-            ["Single Digits", numerology.singleDigits],
-            ["Short Year", numerology.shortYear],
-            ["Month+Day", numerology.monthDay],
-          ].map(([label, val]) => (
-            <div key={String(label)} className="card text-center">
-              <div className="text-[10px] uppercase tracking-wider text-muted mb-1">
-                {label}
-              </div>
-              <div className="font-[family-name:var(--font-mono)] text-xl font-bold text-accent">
-                {val}
-              </div>
+      <main className="mx-auto max-w-7xl px-4 py-6">
+
+        {/* ══════════════════════════════════════════
+            HERO STRIP — today's card header
+        ══════════════════════════════════════════ */}
+        <div
+          className="relative flex items-center justify-between px-8 py-6 mb-8 rounded-xl overflow-hidden"
+          style={{ minHeight: 200 }}
+        >
+          {/* Flower of Life tiling background */}
+          <FlowerOfLifePattern />
+          {/* Amber gradient mesh */}
+          <div
+            className="absolute inset-0"
+            style={{
+              background: "linear-gradient(135deg, rgba(28,18,6,0.92) 0%, rgba(11,15,23,0.97) 60%)",
+              borderRadius: "inherit",
+            }}
+          />
+          {/* Amber border */}
+          <div
+            className="absolute inset-0 rounded-xl"
+            style={{ border: "1px solid rgba(212,165,116,0.18)" }}
+          />
+
+          {/* LEFT — date + numerology decode */}
+          <div className="relative z-10">
+            <div
+              style={{
+                fontFamily: "var(--font-display)",
+                fontSize: 64,
+                lineHeight: 1,
+                letterSpacing: "0.06em",
+                color: "#D4A574",
+                fontWeight: 500,
+              }}
+            >
+              {heroDate}
             </div>
-          ))}
-          <div className="card text-center">
-            <div className="text-[10px] uppercase tracking-wider text-muted mb-1">
-              Moon
-            </div>
-            <div className="flex items-center justify-center gap-1">
-              <Moon size={14} className={fullMoon ? "text-warning" : "text-muted"} />
-              <span className="font-[family-name:var(--font-mono)] text-sm font-bold">
-                {illumination}%
+            <div
+              className="mt-2 flex items-center gap-1.5 flex-wrap"
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 11,
+                color: "#8A8578",
+                letterSpacing: "0.05em",
+              }}
+            >
+              <span>
+                {moStr}+{dyStr}+{yrStr}={numSum}
               </span>
+              <span style={{ color: "#4A4D54" }}>·</span>
+              <span style={{ color: isMasterNum(numerology.singleDigits) ? "#C9A961" : "#5FC9D4" }}>
+                <MasterSpan value={numerology.singleDigits} />
+              </span>
+              <span style={{ color: "#4A4D54" }}>·</span>
+              <span>DAY {dayOfYear}</span>
+              <span style={{ color: "#4A4D54" }}>·</span>
+              <span>WK {weekOfYear}</span>
+              {fullMoon && (
+                <>
+                  <span style={{ color: "#4A4D54" }}>·</span>
+                  <span style={{ color: "#C9A961" }}>
+                    {moonName || "FULL MOON"} {illumination}%
+                  </span>
+                </>
+              )}
             </div>
-            {moonName && (
-              <div className="text-[10px] text-warning mt-0.5">{moonName}</div>
-            )}
+            {/* Secondary numerology row */}
+            <div
+              className="mt-1.5 flex items-center gap-1.5"
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 10,
+                color: "#4A4D54",
+                letterSpacing: "0.05em",
+              }}
+            >
+              <span>FULL {numerology.full}</span>
+              <span>·</span>
+              <span>YEAR {numerology.reducedYear}</span>
+              <span>·</span>
+              <span>MD {numerology.monthDay}</span>
+              <span>·</span>
+              <span style={{ color: "#8A8578" }}>{dayName.split(",")[0].toUpperCase()}</span>
+            </div>
+          </div>
+
+          {/* RIGHT — game counts */}
+          <div
+            className="relative z-10 text-right shrink-0"
+            style={{ fontFamily: "var(--font-mono)" }}
+          >
+            {[
+              { label: "GAMES",    val: games.length,  color: "#E8E4D8" },
+              { label: "LOCKS",    val: lockCount,     color: "#D4A574" },
+              { label: "LEAN",     val: leanCount,     color: "#5FC9D4" },
+              { label: "PASS",     val: passCount,     color: "#4A4D54" },
+            ].map(({ label, val, color }) => (
+              <div key={label} className="flex items-baseline justify-end gap-2 mb-1">
+                <span style={{ fontSize: 9, letterSpacing: "0.1em", color: "#4A4D54" }}>
+                  {label}
+                </span>
+                <span style={{ fontSize: 22, fontWeight: 700, color, lineHeight: 1 }}>
+                  {val}
+                </span>
+              </div>
+            ))}
           </div>
         </div>
 
-        {/* Stats row */}
-        <div className="grid grid-cols-3 gap-3 mb-6">
-          <StatCard label="Games" value={games.length} />
-          <StatCard label="Analyzed" value={analyzedCount} />
-          <StatCard label="Bets" value={betCount} />
-        </div>
-
-        {/* Action buttons */}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-4">
-          <button
-            onClick={handleFetch}
-            disabled={loading !== null}
-            className="card flex items-center justify-center gap-2 py-3 border-accent/30 hover:bg-accent/10 transition-colors disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
-          >
-            <Download size={16} className={loading === "fetch" ? "animate-spin" : ""} />
-            <span className="text-sm font-medium">
-              {loading === "fetch" ? "Fetching..." : "Fetch Games"}
-            </span>
-          </button>
-          <button
-            onClick={handleAnalyze}
-            disabled={loading !== null || games.length === 0}
-            className="card flex items-center justify-center gap-2 py-3 bg-accent/20 border-accent/30 hover:bg-accent/30 transition-colors disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
-          >
-            <Sparkles size={16} className={loading === "analyze" ? "animate-pulse" : ""} />
-            <span className="text-sm font-medium">
-              {analyzeProgress
-                ? `${analyzeProgress.current}/${analyzeProgress.total}...`
-                : loading === "analyze"
-                  ? "Starting..."
-                  : "Analyze & Bet"}
-            </span>
-          </button>
-          <button
-            onClick={handleSettle}
-            disabled={loading !== null || betCount === 0}
-            className="card flex items-center justify-center gap-2 py-3 border-success/30 hover:bg-success/10 transition-colors disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
-          >
-            <CheckCircle size={16} className={loading === "settle" ? "animate-spin" : ""} />
-            <span className="text-sm font-medium">{loading === "settle" ? "Settling…" : "Settle Now"}</span>
-          </button>
-          <button
-            onClick={() => setShowManualModal(true)}
-            disabled={games.length === 0}
-            className="card flex items-center justify-center gap-2 py-3 border-warning/30 hover:bg-warning/10 transition-colors disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
-          >
-            <PenLine size={16} />
-            <span className="text-sm font-medium">Log Pick</span>
-          </button>
-          <button
-            onClick={() => setShowBriefingModal(true)}
-            className="card flex items-center justify-center gap-2 py-3 border-purple-500/30 hover:bg-purple-500/10 transition-colors cursor-pointer"
-          >
-            <BookOpen size={16} className="text-purple-400" />
-            <span className="text-sm font-medium">Briefing</span>
-          </button>
+        {/* ══════════════════════════════════════════
+            ACTION BUTTONS
+        ══════════════════════════════════════════ */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-4">
+          {[
+            {
+              key: "fetch", label: "Fetch Games",
+              icon: <Download size={14} className={loading === "fetch" ? "animate-spin" : ""} />,
+              loadLabel: "Fetching…", onClick: handleFetch,
+              disabled: loading !== null,
+              accent: "rgba(212,165,116,0.12)", border: "rgba(212,165,116,0.2)",
+            },
+            {
+              key: "analyze",
+              label: analyzeProgress
+                ? `${analyzeProgress.current}/${analyzeProgress.total}…`
+                : "Analyze & Bet",
+              icon: <Sparkles size={14} className={loading === "analyze" ? "animate-pulse" : ""} />,
+              loadLabel: "Thinking…", onClick: handleAnalyze,
+              disabled: loading !== null || games.length === 0,
+              accent: "rgba(212,165,116,0.18)", border: "rgba(212,165,116,0.35)",
+            },
+            {
+              key: "settle", label: "Settle Now",
+              icon: <CheckCircle size={14} className={loading === "settle" ? "animate-spin" : ""} />,
+              loadLabel: "Settling…", onClick: handleSettle,
+              disabled: loading !== null || trades.filter(t => t.bet_type !== "analysis").length === 0,
+              accent: "rgba(212,165,116,0.06)", border: "rgba(30,37,50,1)",
+            },
+            {
+              key: "manual", label: "Log Pick",
+              icon: <PenLine size={14} />, loadLabel: "Log Pick",
+              onClick: () => setShowManualModal(true),
+              disabled: games.length === 0,
+              accent: "rgba(201,169,97,0.08)", border: "rgba(201,169,97,0.2)",
+            },
+            {
+              key: "briefing", label: "Briefing",
+              icon: <BookOpen size={14} />, loadLabel: "Briefing",
+              onClick: () => setShowBriefingModal(true),
+              disabled: false,
+              accent: "rgba(95,201,212,0.08)", border: "rgba(95,201,212,0.2)",
+            },
+          ].map(({ key, label, icon, onClick, disabled, accent, border }) => (
+            <button
+              key={key}
+              onClick={onClick}
+              disabled={disabled}
+              className="flex items-center justify-center gap-2 py-3 px-3 rounded-xl transition-colors disabled:opacity-35 cursor-pointer disabled:cursor-not-allowed text-sm"
+              style={{
+                background: accent,
+                border: `1px solid ${border}`,
+                color: "#E8E4D8",
+                fontFamily: "var(--font-display)",
+                letterSpacing: "0.06em",
+                fontSize: 11,
+              }}
+            >
+              {icon}
+              <span>{loading === key ? "..." : label}</span>
+            </button>
+          ))}
         </div>
 
         {statusMsg && (
-          <div className="text-sm text-muted mb-4 text-center">{statusMsg}</div>
+          <div
+            className="text-[11px] text-ash mb-4 text-center"
+            style={{ fontFamily: "var(--font-mono)" }}
+          >
+            {statusMsg}
+          </div>
         )}
 
         {lastSettlement && (
-          <div className="text-[10px] text-muted mb-4 text-center">
-            Last auto-settlement:{" "}
-            <span className="text-text">
+          <div
+            className="text-[10px] text-smoke mb-4 text-center"
+            style={{ fontFamily: "var(--font-mono)" }}
+          >
+            Last settlement:{" "}
+            <span className="text-ash">
               {new Date(lastSettlement.settledAt).toLocaleString("en-US", {
                 month: "short", day: "numeric",
                 hour: "numeric", minute: "2-digit", hour12: true,
@@ -428,11 +539,11 @@ export default function Dashboard() {
             {lastSettlement.betsPlaced != null && lastSettlement.betsPlaced > 0 && (
               <>
                 {" · "}
-                <span className="text-success">{lastSettlement.wins}W</span>
+                <span className="text-amber">{lastSettlement.wins}W</span>
                 {"-"}
-                <span className="text-danger">{lastSettlement.losses}L</span>
-                {" · P&L: "}
-                <span className={lastSettlement.dailyPL != null && lastSettlement.dailyPL >= 0 ? "text-success" : "text-danger"}>
+                <span className="text-blood">{lastSettlement.losses}L</span>
+                {" · "}
+                <span className={lastSettlement.dailyPL != null && lastSettlement.dailyPL >= 0 ? "text-amber" : "text-blood"}>
                   {lastSettlement.dailyPL != null
                     ? `${lastSettlement.dailyPL >= 0 ? "+" : ""}$${lastSettlement.dailyPL.toFixed(0)}`
                     : "—"}
@@ -442,110 +553,193 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Bot selector */}
-        <div className="flex items-center gap-2 mb-4">
-          <span className="text-xs text-muted uppercase tracking-wider">Bot:</span>
-          {(["all", "A", "B", "C", "D"] as BotSelection[]).map((b) => (
-            <button
-              key={b}
-              onClick={() => setSelectedBot(b)}
-              className={`text-xs font-medium px-3 py-1.5 rounded-full transition-colors ${
-                selectedBot === b
-                  ? "bg-accent/20 text-accent"
-                  : "text-muted hover:text-text"
-              }`}
-            >
-              {BOT_LABELS[b]}
-            </button>
-          ))}
+        {/* ══════════════════════════════════════════
+            BOT SELECTOR — tarot-card tabs
+        ══════════════════════════════════════════ */}
+        <div className="flex items-stretch gap-2 mb-5 overflow-x-auto">
+          {(["all", "A", "B", "C", "D"] as BotSelection[]).map((b) => {
+            const active = selectedBot === b;
+            return (
+              <button
+                key={b}
+                onClick={() => setSelectedBot(b)}
+                className="flex flex-col items-center justify-center gap-0.5 px-5 py-3 rounded-xl transition-all duration-[180ms] shrink-0"
+                style={{
+                  minWidth: 80,
+                  background: active ? "rgba(212,165,116,0.1)" : "rgba(20,25,35,0.5)",
+                  border: active ? "1px solid rgba(212,165,116,0.55)" : "1px solid #1E2532",
+                  boxShadow: active ? "0 0 16px -4px rgba(212,165,116,0.25)" : "none",
+                  opacity: active ? 1 : 0.55,
+                }}
+              >
+                <span
+                  style={{
+                    fontFamily: "var(--font-display)",
+                    fontSize: b === "all" ? 13 : 22,
+                    fontWeight: 600,
+                    color: active ? "#D4A574" : "#8A8578",
+                    letterSpacing: "0.08em",
+                    lineHeight: 1,
+                  }}
+                >
+                  {BOT_LABELS[b].short}
+                </span>
+                <span
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 8,
+                    color: active ? "#8A8578" : "#4A4D54",
+                    letterSpacing: "0.08em",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {BOT_LABELS[b].method}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
-        {/* League filter */}
+        {/* ══════════════════════════════════════════
+            LEAGUE FILTER
+        ══════════════════════════════════════════ */}
         <div className="flex items-center gap-2 mb-6">
-          <Filter size={14} className="text-muted" />
           {(["ALL", "NBA", "NHL", "MLB"] as League[]).map((l) => (
             <button
               key={l}
               onClick={() => setLeague(l)}
-              className={`text-xs font-medium px-3 py-1.5 rounded-full transition-colors ${
-                league === l
-                  ? "bg-accent/20 text-accent"
-                  : "text-muted hover:text-text"
-              }`}
+              className="text-[11px] font-medium px-3 py-1.5 rounded-full transition-colors"
+              style={{
+                fontFamily: "var(--font-display)",
+                letterSpacing: "0.08em",
+                background: league === l ? "rgba(212,165,116,0.12)" : "transparent",
+                border: league === l ? "1px solid rgba(212,165,116,0.3)" : "1px solid transparent",
+                color: league === l ? "#D4A574" : "#8A8578",
+              }}
             >
               {l} ({leagueCounts[l]})
             </button>
           ))}
         </div>
 
-        {/* Best Pick of the Day */}
+        {/* ══════════════════════════════════════════
+            BEST PICK OF THE DAY
+        ══════════════════════════════════════════ */}
         {(() => {
-          const BOT_BADGE: Record<string, string> = {
-            A: "bg-blue-500/20 text-blue-400",
-            B: "bg-cyan-500/20 text-cyan-400",
-            C: "bg-purple-500/20 text-purple-400",
-          };
-          const best = trades.length > 0
-            ? trades.reduce((b, t) => (t.confidence ?? 0) > (b.confidence ?? 0) ? t : b)
+          const realTrades = trades.filter(t => t.bet_type !== "analysis");
+          const best = realTrades.length > 0
+            ? realTrades.reduce((b, t) => (t.confidence ?? 0) > (b.confidence ?? 0) ? t : b)
             : null;
           if (!best) return null;
           const game = best.game;
           return (
-            <div className="card border-accent/20 bg-accent/5 mb-6">
+            <div
+              className="mb-6 p-4 rounded-xl"
+              style={{
+                background: "rgba(212,165,116,0.06)",
+                border: "1px solid rgba(212,165,116,0.2)",
+              }}
+            >
               <div className="flex items-center gap-2 mb-2">
-                <Trophy size={13} className="text-accent" />
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-accent">
-                  Best Pick of the Day
+                <Trophy size={12} style={{ color: "#D4A574" }} />
+                <span
+                  className="text-[10px] font-semibold tracking-widest"
+                  style={{
+                    fontFamily: "var(--font-display)",
+                    letterSpacing: "0.12em",
+                    color: "#D4A574",
+                  }}
+                >
+                  BEST PICK OF THE DAY
                 </span>
               </div>
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 mb-1 flex-wrap">
-                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${BOT_BADGE[best.bot] ?? ""}`}>
+                    <span
+                      className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                      style={{
+                        fontFamily: "var(--font-display)",
+                        letterSpacing: "0.08em",
+                        background: "rgba(212,165,116,0.12)",
+                        color: "#D4A574",
+                      }}
+                    >
                       BOT {best.bot}
                     </span>
                     <LockBadge lockType={best.lock_type} />
                     {game && (
-                      <span className="text-[10px] text-muted">{game.league}</span>
+                      <span
+                        className="text-[10px]"
+                        style={{ fontFamily: "var(--font-mono)", color: "#8A8578" }}
+                      >
+                        {game.league}
+                      </span>
                     )}
                   </div>
-                  <div className="text-sm font-semibold text-text">{best.pick}</div>
+                  <div className="text-sm font-semibold text-bone">{best.pick}</div>
                   {game && (
-                    <div className="text-[10px] text-muted mt-0.5">
-                      {game.away_team} at {game.home_team}
+                    <div
+                      className="text-[10px] mt-0.5"
+                      style={{ fontFamily: "var(--font-mono)", color: "#8A8578" }}
+                    >
+                      {game.away_team} @ {game.home_team}
                     </div>
                   )}
                   {best.reasoning && (
-                    <div className="text-[10px] text-muted mt-1.5 leading-relaxed line-clamp-2">
+                    <div
+                      className="text-[10px] mt-1.5 leading-relaxed line-clamp-2"
+                      style={{ color: "#8A8578" }}
+                    >
                       {best.reasoning}
                     </div>
                   )}
                 </div>
                 <div className="text-right shrink-0">
-                  <div className="font-[family-name:var(--font-mono)] text-xs text-muted">
+                  <div
+                    className="text-xs"
+                    style={{ fontFamily: "var(--font-mono)", color: "#8A8578" }}
+                  >
                     {best.odds != null ? (best.odds > 0 ? `+${best.odds}` : String(best.odds)) : "—"}
                   </div>
-                  <div className="text-lg font-bold font-[family-name:var(--font-mono)] text-accent">
+                  <div
+                    className="text-2xl font-bold"
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      color: "#D4A574",
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                  >
                     {Math.round(best.confidence ?? 0)}%
                   </div>
-                  <div className="text-[9px] text-muted">confidence</div>
+                  <div className="text-[9px] text-smoke">confidence</div>
                 </div>
               </div>
             </div>
           );
         })()}
 
-        {/* Game grid */}
+        {/* ══════════════════════════════════════════
+            GAME GRID
+        ══════════════════════════════════════════ */}
         {filtered.length === 0 ? (
-          <div className="card text-center py-16">
-            <p className="text-muted text-lg mb-2">No games loaded</p>
-            <p className="text-muted text-sm">
-              Click <strong>Fetch Games</strong> to scan today&apos;s slate
+          <div
+            className="text-center py-20 rounded-xl"
+            style={{ border: "1px solid #1E2532", background: "rgba(11,15,23,0.6)" }}
+          >
+            <p
+              className="text-lg mb-2"
+              style={{ fontFamily: "var(--font-display)", letterSpacing: "0.08em", color: "#8A8578" }}
+            >
+              NO GAMES LOADED
+            </p>
+            <p className="text-sm text-smoke">
+              Click <span className="text-amber">Fetch Games</span> to scan today&apos;s slate
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {filtered.map((game) => (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
+            {filtered.map((game, i) => (
               <GameCard
                 key={game.id}
                 game={game}
@@ -553,20 +747,32 @@ export default function Dashboard() {
                 onReanalyze={() => handleReanalyze(game.id)}
                 reanalyzing={reanalyzingId === game.id}
                 onClick={() => setSelectedGame(game)}
+                className="card-mount"
+                style={{ animationDelay: `${i * 60}ms` } as React.CSSProperties}
               />
             ))}
           </div>
         )}
 
-        {/* Decode Journal */}
-        <div className="mt-8">
+        {/* ══════════════════════════════════════════
+            DECODE JOURNAL
+        ══════════════════════════════════════════ */}
+        <div className="mt-10">
           <div className="flex items-center gap-2 mb-2">
-            <BookOpen size={14} className="text-muted" />
-            <span className="text-xs font-medium uppercase tracking-wider text-muted">
-              Decode Journal
+            <BookOpen size={13} style={{ color: "#8A8578" }} />
+            <span
+              className="text-[10px] font-medium tracking-widest"
+              style={{ fontFamily: "var(--font-display)", color: "#8A8578", letterSpacing: "0.12em" }}
+            >
+              DECODE JOURNAL
             </span>
             {notesSaving && (
-              <span className="text-[10px] text-muted animate-pulse">saving…</span>
+              <span
+                className="text-[10px] animate-pulse"
+                style={{ fontFamily: "var(--font-mono)", color: "#4A4D54" }}
+              >
+                saving…
+              </span>
             )}
           </div>
           <textarea
@@ -574,10 +780,22 @@ export default function Dashboard() {
             onChange={(e) => handleNotesChange(e.target.value)}
             rows={5}
             placeholder={`Notes for ${today} — alignments you spotted, narratives in play, numbers to watch…`}
-            className="w-full bg-surface border border-border rounded-lg px-3 py-2.5 text-sm text-text placeholder:text-muted resize-y focus:outline-none focus:border-accent/50 transition-colors"
+            className="w-full rounded-xl px-4 py-3 text-sm resize-y focus:outline-none transition-colors"
+            style={{
+              background: "#0B0F17",
+              border: "1px solid #1E2532",
+              color: "#E8E4D8",
+              fontFamily: "var(--font-mono)",
+              fontSize: 12,
+            }}
+            onFocus={e => (e.currentTarget.style.borderColor = "rgba(212,165,116,0.4)")}
+            onBlur={e  => (e.currentTarget.style.borderColor = "#1E2532")}
           />
-          <p className="text-[10px] text-muted mt-1">
-            Auto-saved · Injected into all bot prompts when Analyze &amp; Bet runs
+          <p
+            className="text-[10px] mt-1"
+            style={{ fontFamily: "var(--font-mono)", color: "#4A4D54" }}
+          >
+            Auto-saved · Injected into all bot prompts on analysis
           </p>
         </div>
       </main>
@@ -586,10 +804,7 @@ export default function Dashboard() {
         <ManualPickModal
           games={games}
           onClose={() => setShowManualModal(false)}
-          onSaved={() => {
-            loadGames();
-            toast.success("Pick logged");
-          }}
+          onSaved={() => { loadGames(); toast.success("Pick logged"); }}
         />
       )}
 
@@ -603,7 +818,6 @@ export default function Dashboard() {
       {showBriefingModal && (
         <BriefingModal onClose={() => setShowBriefingModal(false)} />
       )}
-
     </div>
   );
 }

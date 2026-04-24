@@ -1,46 +1,238 @@
 @import "tailwindcss";
 
+/* ─────────────────────────────────────────────────────────────
+   GEMATRIA DESIGN SYSTEM  —  HUNGRY SYSTEM v2
+   The numbers speak. Design clears the way.
+───────────────────────────────────────────────────────────── */
+
 @theme {
-  --color-bg: #0a0a0f;
-  --color-surface: #12121a;
-  --color-surface-hover: #1a1a26;
-  --color-border: rgba(255, 255, 255, 0.08);
-  --color-border-accent: rgba(167, 139, 250, 0.3);
-  --color-accent: #a78bfa;
-  --color-accent-dim: #7c3aed;
-  --color-text: #e4e4e7;
-  --color-muted: #71717a;
-  --color-success: #22c55e;
-  --color-danger: #ef4444;
-  --color-warning: #f59e0b;
-  --font-display: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-jetbrains), ui-monospace, "JetBrains Mono", monospace;
+  /* ── Surfaces ── */
+  --color-void:       #05070B;
+  --color-obsidian:   #0B0F17;
+  --color-graphite:   #141923;
+  --color-fog:        #1E2532;
+
+  /* ── Text ── */
+  --color-bone:       #E8E4D8;
+  --color-ash:        #8A8578;
+  --color-smoke:      #4A4D54;
+
+  /* ── Accents ── */
+  --color-amber:      #D4A574;
+  --color-amber-hot:  #F4B860;
+  --color-cipher:     #5FC9D4;
+  --color-cipher-dim: #3A8B95;
+  --color-blood:      #8B2635;
+  --color-gold:       #C9A961;
+
+  /* ── Semantic aliases keep existing classes working ── */
+  --color-bg:             #05070B;
+  --color-surface:        #0B0F17;
+  --color-surface-hover:  #141923;
+  --color-border:         #1E2532;
+  --color-border-accent:  rgba(212, 165, 116, 0.35);
+  --color-accent:         #D4A574;
+  --color-accent-dim:     #3A8B95;
+  --color-text:           #E8E4D8;
+  --color-muted:          #8A8578;
+  --color-success:        #D4A574;  /* amber — our picks, wins   */
+  --color-danger:         #8B2635;  /* blood — sacrifice, losses */
+  --color-warning:        #C9A961;  /* gold  — master numbers    */
+
+  /* ── Fonts ── */
+  --font-display: var(--font-cinzel), 'Trajan Pro', serif;
+  --font-mono:    var(--font-jetbrains), 'JetBrains Mono', monospace;
+  --font-ui:      var(--font-inter-tight), 'Inter Tight', sans-serif;
+  --font-accent:  var(--font-cormorant), 'Cormorant Garamond', serif;
 }
 
+/* ── Base ──────────────────────────────────────────────────── */
 @layer base {
-  html,
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { overflow-x: hidden; }
+
   body {
-    overflow-x: hidden;
+    background-color: var(--color-void);
+    background-image: radial-gradient(
+      ellipse 80% 60% at 50% 28%,
+      #0B0F17 0%,
+      #05070B 72%
+    );
+    background-attachment: fixed;
+    color: var(--color-bone);
+    font-family: var(--font-ui);
+    padding-left: 72px; /* fixed sidebar offset */
   }
-  body {
-    background-color: var(--color-bg);
-    color: var(--color-text);
-    font-family: var(--font-display);
+
+  /* Film-grain noise — kills the "AI dashboard" feel */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    pointer-events: none;
+    opacity: 0.04;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-repeat: repeat;
+    background-size: 200px 200px;
   }
 }
 
+/* ── Utilities ─────────────────────────────────────────────── */
 @layer utilities {
+
+  /* ── Standard card ── */
   .card {
-    background-color: var(--color-surface);
-    border: 1px solid var(--color-border);
+    background-color: var(--color-obsidian);
+    border: 1px solid var(--color-fog);
     border-radius: 0.75rem;
     padding: 1.25rem;
+    transition: border-color 180ms ease-out, transform 180ms ease-out;
   }
+
+  /* ── Tier 1 LOCK — glassmorphism + amber glow ── */
+  .card-lock {
+    background: rgba(20, 25, 35, 0.62);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid rgba(212, 165, 116, 0.6);
+    border-radius: 0.75rem;
+    padding: 1.25rem;
+    box-shadow:
+      0 0 40px -10px rgba(244, 184, 96, 0.35),
+      inset 0 0 0 1px rgba(212, 165, 116, 0.12);
+    transition: border-color 180ms ease-out, transform 180ms ease-out, box-shadow 180ms ease-out;
+  }
+
+  /* ── Tier 2 LEAN — subtle glass ── */
+  .card-lean {
+    background: rgba(20, 25, 35, 0.55);
+    backdrop-filter: blur(12px) saturate(120%);
+    -webkit-backdrop-filter: blur(12px) saturate(120%);
+    border: 1px solid var(--color-fog);
+    border-radius: 0.75rem;
+    padding: 1.25rem;
+    transition: border-color 180ms ease-out, transform 180ms ease-out;
+  }
+
+  /* ── Tier 3 PASS — flat, dimmed, diagonal hairline ── */
+  .card-pass {
+    background-color: var(--color-obsidian);
+    border: 1px solid var(--color-fog);
+    border-radius: 0.75rem;
+    padding: 0.875rem;
+    opacity: 0.5;
+    position: relative;
+    overflow: hidden;
+    transition: opacity 180ms ease-out;
+  }
+  .card-pass::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      168deg,
+      transparent 49.3%,
+      rgba(74, 77, 84, 0.28) 49.3%,
+      rgba(74, 77, 84, 0.28) 50.7%,
+      transparent 50.7%
+    );
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  /* ── Hover lifts ── */
+  .card:hover,
+  .card-lean:hover {
+    transform: translateY(-2px);
+    border-color: rgba(212, 165, 116, 0.28);
+  }
+  .card-lock:hover {
+    transform: translateY(-2px);
+    border-color: rgba(212, 165, 116, 0.85);
+    box-shadow:
+      0 0 55px -8px rgba(244, 184, 96, 0.5),
+      inset 0 0 0 1px rgba(212, 165, 116, 0.22);
+  }
+  .card-pass:hover { opacity: 0.72; }
+
+  /* ── Glass surface ── */
+  .glass {
+    background: rgba(20, 25, 35, 0.55);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid rgba(232, 228, 216, 0.08);
+  }
+
+  /* ── Amber glow ── */
+  .glow-amber {
+    box-shadow:
+      0 0 40px -10px rgba(244, 184, 96, 0.35),
+      inset 0 0 0 1px rgba(212, 165, 116, 0.12);
+  }
+
+  /* ── Stat value ── */
   .stat-value {
     font-family: var(--font-mono);
     font-size: 1.5rem;
-    line-height: 2rem;
     font-weight: 700;
     font-variant-numeric: tabular-nums;
+    color: var(--color-amber);
+  }
+
+  /* ── Display font shorthand ── */
+  .font-display {
+    font-family: var(--font-display);
+    letter-spacing: 0.08em;
+    font-weight: 500;
+    text-transform: uppercase;
+  }
+
+  /* ── Mono tabular ── */
+  .mono-num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ── Master number gold ── */
+  .master-num {
+    color: var(--color-gold);
+    animation: master-pulse 600ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  /* ── Card stagger reveal ── */
+  .card-mount {
+    animation: card-mount 400ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+}
+
+/* ── Keyframes ─────────────────────────────────────────────── */
+@keyframes card-mount {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes master-pulse {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+
+@keyframes slow-rotate {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@keyframes amber-ping {
+  0%   { box-shadow: 0 0 0 0 rgba(212, 165, 116, 0.55); }
+  100% { box-shadow: 0 0 0 10px rgba(212, 165, 116, 0); }
+}
+
+/* Honor prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
   }
 }
