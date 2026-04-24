@@ -29,12 +29,15 @@ function getBotSettings(bot: BotId, s: GematriaSettings): { systemPrompt: string
   return { systemPrompt: s.system_prompt, model: s.model }
 }
 
+type RecentReflection = { reflection_date: string; reflection_content: string }
+
 function buildBriefingContext(
   bot: BotId,
   games: Game[],
   todayBets: PaperTrade[],
   notes: string,
   date: string,
+  recentReflections?: RecentReflection[],
 ): string {
   const [y, m, d] = date.split('-').map(Number)
   const dateObj = new Date(y!, m! - 1, d!)
@@ -49,6 +52,16 @@ function buildBriefingContext(
 
   if (bot !== 'D') {
     lines.push(`\nDATE NUMEROLOGY: Full=${dn.full} | Reduced=${dn.reducedYear} | SingleDigits=${dn.singleDigits} | Short=${dn.shortYear} | M+D=${dn.monthDay}`)
+  }
+
+  if (recentReflections && recentReflections.length > 0) {
+    lines.push(`\n=== YOUR RECENT SELF-ANALYSIS (last ${recentReflections.length} session${recentReflections.length > 1 ? 's' : ''}) ===`)
+    lines.push('Use this to calibrate your confidence today. Where you were wrong before, temper your language. Where you were right, reinforce it.')
+    for (const r of recentReflections) {
+      lines.push(`\n--- ${r.reflection_date} ---`)
+      lines.push(r.reflection_content)
+    }
+    lines.push('\n=== END SELF-ANALYSIS ===')
   }
 
   if (notes?.trim()) {
@@ -111,13 +124,25 @@ async function generateBotBriefing(
   settings: GematriaSettings,
   notes: string,
   date: string,
+  sb: ReturnType<typeof getSupabaseAdmin>,
 ): Promise<string> {
   const { systemPrompt, model } = getBotSettings(bot, settings)
   if (!systemPrompt?.trim()) {
     return `*${BOT_NAMES[bot]} is not configured. Add a system prompt in Settings to activate this bot.*`
   }
 
-  const context = buildBriefingContext(bot, games, todayBets, notes, date)
+  // Fetch last 2 reflections for this bot to inject as self-calibration context
+  const { data: reflectionRows } = await sb
+    .from('briefing_reflections')
+    .select('reflection_date, reflection_content')
+    .eq('bot', bot)
+    .lt('reflection_date', date)
+    .order('reflection_date', { ascending: false })
+    .limit(2)
+
+  const recentReflections = ((reflectionRows ?? []) as RecentReflection[]).reverse()
+
+  const context = buildBriefingContext(bot, games, todayBets, notes, date, recentReflections)
   const userMessage = context + buildBriefingInstruction()
 
   const client = new Anthropic()
@@ -270,7 +295,7 @@ export async function POST() {
           activeBots.map(async (bot) => {
             send({ type: 'bot_start', bot, name: BOT_NAMES[bot] })
             try {
-              const content = await generateBotBriefing(bot, games, todayBets, settings, notes, today)
+              const content = await generateBotBriefing(bot, games, todayBets, settings, notes, today, sb)
               botBriefings[bot] = content
               send({ type: 'bot_done', bot, name: BOT_NAMES[bot], content })
 
