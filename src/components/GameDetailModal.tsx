@@ -144,19 +144,19 @@ export default function GameDetailModal({ game, onClose }: GameDetailModalProps)
         ) : trades.length === 0 ? (
           <div className="text-center py-6">
             <p className="text-sm text-muted">
-              {game.analyzed ? "Analyzed — no bet placed" : "Not yet analyzed"}
+              {game.analyzed ? "Analyzed — no picks placed" : "Not yet analyzed"}
             </p>
-            {game.analyzed && (
+            {!game.analyzed && (
               <p className="text-xs text-muted mt-1">
-                Lock type or confidence did not meet auto-bet thresholds
+                Run analysis to see bot leans and reasoning for this game
               </p>
             )}
           </div>
         ) : (
           <div className="space-y-3">
-            {trades.map((trade) => (
+            {/* Real bets first */}
+            {trades.filter(t => t.bet_type !== "analysis").map((trade) => (
               <div key={trade.id} className="border border-border rounded-lg p-3">
-                {/* Bot + result badge */}
                 <div className="flex items-center justify-between mb-2">
                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${BOT_COLORS[trade.bot] ?? BOT_COLORS.A}`}>
                     {BOT_LABELS[trade.bot] ?? `Bot ${trade.bot}`}
@@ -170,8 +170,6 @@ export default function GameDetailModal({ game, onClose }: GameDetailModalProps)
                     {trade.result.toUpperCase()}
                   </span>
                 </div>
-
-                {/* Pick summary */}
                 <div className="flex items-baseline gap-3 mb-2 flex-wrap">
                   <span className="font-semibold text-sm text-text">{trade.pick}</span>
                   <span className="text-xs text-muted">{trade.bet_type === "over_under" ? "O/U" : "ML"}</span>
@@ -188,16 +186,41 @@ export default function GameDetailModal({ game, onClose }: GameDetailModalProps)
                     </span>
                   )}
                 </div>
-
-                {/* Reasoning */}
                 {trade.reasoning && (
                   <div className="bg-black/20 rounded p-2.5">
-                    <div className="text-[10px] uppercase tracking-wider text-muted mb-1.5">
-                      Reasoning
-                    </div>
-                    <p className="text-xs text-muted leading-relaxed whitespace-pre-wrap">
-                      {trade.reasoning}
-                    </p>
+                    <div className="text-[10px] uppercase tracking-wider text-muted mb-1.5">Reasoning</div>
+                    <p className="text-xs text-muted leading-relaxed whitespace-pre-wrap">{trade.reasoning}</p>
+                  </div>
+                )}
+              </div>
+            ))}
+
+            {/* Pass leans — always shown, marked clearly */}
+            {trades.filter(t => t.bet_type === "analysis").map((trade) => (
+              <div key={trade.id} className="border border-border/50 rounded-lg p-3 opacity-80">
+                <div className="flex items-center justify-between mb-2">
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${BOT_COLORS[trade.bot] ?? BOT_COLORS.A}`}>
+                    {BOT_LABELS[trade.bot] ?? `Bot ${trade.bot}`}
+                  </span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-zinc-800/60 text-zinc-500">
+                    PASS
+                  </span>
+                </div>
+                <div className="flex items-baseline gap-3 mb-2 flex-wrap">
+                  <span className="font-semibold text-sm text-muted">
+                    Lean: {trade.pick}
+                  </span>
+                  {trade.confidence != null && (
+                    <span className="text-xs text-muted">{Math.round(trade.confidence)}% signal</span>
+                  )}
+                  {trade.lock_type && trade.lock_type !== "no_lock" && (
+                    <span className="text-xs text-zinc-600 uppercase">{trade.lock_type.replace("_", " ")}</span>
+                  )}
+                </div>
+                {trade.reasoning && (
+                  <div className="bg-black/10 rounded p-2.5">
+                    <div className="text-[10px] uppercase tracking-wider text-zinc-600 mb-1.5">Analysis</div>
+                    <p className="text-xs text-zinc-500 leading-relaxed whitespace-pre-wrap">{trade.reasoning}</p>
                   </div>
                 )}
               </div>

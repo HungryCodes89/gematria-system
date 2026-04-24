@@ -98,7 +98,7 @@ export interface PaperTrade {
   id: string;
   game_id: string;
   bot: "A" | "B" | "C" | "D";
-  bet_type: "moneyline" | "over_under";
+  bet_type: "moneyline" | "over_under" | "analysis";
   pick: string;
   picked_side: "home" | "away" | null;
   odds: number | null;
@@ -108,7 +108,7 @@ export interface PaperTrade {
   units: number;
   stake: number;
   potential_profit: number | null;
-  result: "pending" | "win" | "loss" | "push" | "void";
+  result: "pending" | "win" | "loss" | "push" | "void" | "pass";
   profit_loss: number;
   confidence: number | null;
   lock_type: string | null;

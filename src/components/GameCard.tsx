@@ -107,7 +107,10 @@ export default function GameCard({
 }: GameCardProps) {
   const [showBooks, setShowBooks] = useState(false);
   const odds = game.polymarket_odds;
-  const hasBets = trades.length > 0;
+  const realBets = trades.filter((t) => t.bet_type !== "analysis");
+  const passLeans = trades.filter((t) => t.bet_type === "analysis");
+  const hasBets = realBets.length > 0;
+  const hasLeans = passLeans.length > 0;
 
   const statusDisplay =
     game.status === "final"
@@ -276,21 +279,26 @@ export default function GameCard({
         </div>
       )}
 
-      {/* Bot picks */}
-      {hasBets && (
+      {/* Bot picks + leans */}
+      {(hasBets || hasLeans) && (
         <div className="mt-2 pt-2 border-t border-border space-y-1">
-          {trades.map((t) => (
-            <div
-              key={t.id}
-              className="flex items-center gap-1.5 text-xs justify-center"
-            >
-              <span
-                className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${BOT_BADGE[t.bot] ?? "bg-surface text-muted"}`}
-              >
+          {realBets.map((t) => (
+            <div key={t.id} className="flex items-center gap-1.5 text-xs justify-center">
+              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${BOT_BADGE[t.bot] ?? "bg-surface text-muted"}`}>
                 {t.bot}
               </span>
               <span className="text-success font-medium truncate">
                 {t.pick} · {t.units}u
+              </span>
+            </div>
+          ))}
+          {passLeans.map((t) => (
+            <div key={t.id} className="flex items-center gap-1.5 text-xs justify-center opacity-50">
+              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${BOT_BADGE[t.bot] ?? "bg-surface text-muted"}`}>
+                {t.bot}
+              </span>
+              <span className="text-muted truncate">
+                {t.pick} · pass
               </span>
             </div>
           ))}

@@ -91,7 +91,29 @@ async function placeBots(
 
     if (decision.action !== "bet") {
       const reason = "Claude returned action=skip";
-      console.log(`[placeBots] Bot ${bot} [${idx}] SKIP — ${reason} | pick=${decision.pick} conf=${decision.confidence}`);
+      console.log(`[placeBots] Bot ${bot} [${idx}] SKIP — ${reason} | lean=${decision.pick} conf=${decision.confidence}`);
+      // Store lean/pass analysis so UI always shows reasoning even when no bet is placed.
+      // Uses bet_type='analysis' to avoid conflicting with real moneyline/over_under records.
+      await supabase.from("paper_trades").upsert({
+        game_id: game.id,
+        bot,
+        bet_type: "analysis",
+        pick: decision.pick || "Pass",
+        picked_side: decision.pickedSide ?? null,
+        odds: null,
+        implied_probability: null,
+        model_probability: null,
+        ev: null,
+        units: 0,
+        stake: 0,
+        potential_profit: 0,
+        result: "pass",
+        profit_loss: 0,
+        confidence: decision.confidence,
+        lock_type: analysis.lockType,
+        reasoning: decision.reasoning,
+        placed_at: new Date().toISOString(),
+      }, { onConflict: "game_id,bet_type,bot" });
       logs.push({ ...base, placed: false, skipReason: reason });
       continue;
     }

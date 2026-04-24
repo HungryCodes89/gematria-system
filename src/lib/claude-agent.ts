@@ -439,15 +439,15 @@ Return an array of trade decision objects. Each object must have:
   "betType": "moneyline" | "over_under",
   "pick": "<team name or Over/Under X.X>",
   "pickedSide": "home" | "away" | null,
-  "odds": <american odds number>,
+  "odds": <american odds number or 0 if skipping>,
   "impliedProbability": <0-1>,
   "modelProbability": <0-1>,
   "ev": <expected value as decimal>,
-  "units": <1-${settings.max_units_per_bet}>,
+  "units": <1-${settings.max_units_per_bet} if betting, 0 if skipping>,
   "confidence": <0-100>,
-  "reasoning": "<brief reasoning>"
+  "reasoning": "<your full analysis: signals observed, what the numbers say, lean direction, and WHY you are or are not betting — always include even on skips>"
 }
-If you skip the game entirely, return a single-element array with action "skip".`;
+IMPORTANT: Even when action is "skip", always include your LEAN (which team you favor and why) and full signal reasoning in the reasoning field. Never leave reasoning empty. A skip is not a pass on analysis — it means the signal is not strong enough to bet, but you still have a read. Mark the pick field with your lean team even on skips.`;
 
   const parts = [settings.system_prompt, settings.bet_rules, jsonInstructions];
   return parts.filter(Boolean).join("\n\n");
