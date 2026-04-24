@@ -138,16 +138,13 @@ export default function GameCard({
   const hasBooks =
     odds?.books != null && Object.keys(odds.books).length > 0;
 
-  const sharpSide = odds?.sharpHome
-    ? game.home_team.split(" ").pop()
-    : odds?.sharpAway
-      ? game.away_team.split(" ").pop()
-      : null;
-  const sharpLabel = sharpSide
-    ? `SHARP ${sharpSide}`
-    : odds?.sharpOU
-      ? `SHARP ${odds.sharpOU.toUpperCase()}`
-      : null;
+  // Sharp money badges — BET (green) and FADE (red) with gap %
+  const sharpBetTeam  = odds?.sharpHome ? game.home_team : odds?.sharpAway ? game.away_team : null;
+  const sharpFadeTeam = odds?.sharpHome ? game.away_team : odds?.sharpAway ? game.home_team : null;
+  const sharpGapRaw   = odds?.sharpHome ? odds?.mlGapHome : odds?.sharpAway ? odds?.mlGapAway : null;
+  const sharpGap      = sharpGapRaw != null ? Math.abs(sharpGapRaw) : null;
+  // Use last word as compact label; keeps badge tight on small cards
+  const shortName = (n: string) => n.split(" ").pop() ?? n;
 
   return (
     <div
@@ -169,13 +166,31 @@ export default function GameCard({
               PT
             </span>
           )}
-          {sharpLabel && (
+          {sharpBetTeam && (
             <span
-              title={`Sharp action: ${odds?.sharpBook ?? 'sharp book'} vs ${odds?.softBook ?? 'soft book'} implied prob gap ≥3%`}
+              title={`${odds?.sharpBook ?? "Sharp book"} implied prob gap: +${sharpGap?.toFixed(1) ?? "?"}% over ${odds?.softBook ?? "soft book"}`}
+              className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-success/20 text-success flex items-center gap-0.5"
+            >
+              <Zap size={8} />
+              {`BET ${shortName(sharpBetTeam)}${sharpGap != null ? ` +${sharpGap.toFixed(1)}%` : ""}`}
+            </span>
+          )}
+          {sharpFadeTeam && (
+            <span
+              title={`Fade ${sharpFadeTeam} — public money on this side, sharps against`}
+              className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-danger/20 text-danger flex items-center gap-0.5"
+            >
+              <Zap size={8} />
+              {`FADE ${shortName(sharpFadeTeam)}${sharpGap != null ? ` ${sharpGap.toFixed(1)}%` : ""}`}
+            </span>
+          )}
+          {!sharpBetTeam && odds?.sharpOU && (
+            <span
+              title={`Sharp money on the ${odds.sharpOU}`}
               className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400 flex items-center gap-0.5"
             >
               <Zap size={8} />
-              {sharpLabel}
+              {`SHARP ${odds.sharpOU.toUpperCase()}`}
             </span>
           )}
         </div>
