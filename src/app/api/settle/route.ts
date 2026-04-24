@@ -176,6 +176,7 @@ export async function POST() {
     // ── Settle final games ───────────────────────────────────────────────────
     let settled = 0, wins = 0, losses = 0, pushes = 0, totalPL = 0
     const settledTradeRecords: SettledTradeRecord[] = []
+    const historicalUpserts = new Map<string, object>() // keyed by game_id, deduped
 
     for (const trade of pendingTrades) {
       const liveScores = scoreMap.get(trade.game_id)
@@ -216,6 +217,26 @@ export async function POST() {
         .eq('result', 'pending')
 
       if (!updateErr) {
+        // Collect for historical_games archive (deduped per game)
+        if (!historicalUpserts.has(trade.game_id)) {
+          const g = trade.game as any
+          const gdate: string = g?.game_date ?? ''
+          const [yr, mo] = gdate.split('-').map(Number)
+          const league: string = g?.league ?? ''
+          const season = league === 'MLB'
+            ? String(yr)
+            : (mo >= 10 ? `${yr}-${String(yr + 1).slice(2)}` : `${yr - 1}-${String(yr).slice(2)}`)
+          historicalUpserts.set(trade.game_id, {
+            id: trade.game_id,
+            league,
+            season,
+            game_date: gdate,
+            home_team: g?.home_team ?? '',
+            away_team: g?.away_team ?? '',
+            home_score: liveScores.homeScore,
+            away_score: liveScores.awayScore,
+          })
+        }
         settled++
         totalPL += pl
         if (result === 'win') wins++
@@ -264,6 +285,14 @@ export async function POST() {
           date: today, balance: newBalance,
           daily_pl: totalPL, wins, losses, bets_placed: settled,
         }, { onConflict: 'date' })
+    }
+
+    // ── Archive final games to historical_games ──────────────────────────────
+    if (historicalUpserts.size > 0) {
+      await sb
+        .from('historical_games')
+        .upsert([...historicalUpserts.values()], { onConflict: 'id', ignoreDuplicates: true })
+        .then(({ error }) => { if (error) console.warn('[settle] historical_games upsert:', error.message) })
     }
 
     // ── Record performance feedback (non-blocking) ───────────────────────────

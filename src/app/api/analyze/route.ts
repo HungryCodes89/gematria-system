@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-server";
 import { getTodayET } from "@/lib/date-utils";
 import { analyzeGameWithClaude } from "@/lib/claude-agent";
+import { getH2HContext } from "@/lib/h2h-engine";
 import { canPlaceBet, calculateStake } from "@/lib/paper-trading";
 import { calculateDateNumerology, getAllDateValues } from "@/lib/gematria";
 import type {
@@ -394,6 +395,19 @@ export async function POST(req: NextRequest) {
   let analyzed = 0;
   const errors: string[] = [];
 
+  // Pre-fetch H2H context for all games before streaming begins (fast Supabase queries)
+  const h2hMap = new Map<string, string>();
+  await Promise.all(
+    unanalyzed.map(async (game) => {
+      try {
+        const ctx = await getH2HContext(game.home_team, game.away_team, game.league, game.game_date, supabase);
+        h2hMap.set(game.id, ctx);
+      } catch {
+        // H2H is supplementary — never block analysis
+      }
+    })
+  );
+
   const stream = new ReadableStream({
     async start(controller) {
       for (let i = 0; i < unanalyzed.length; i++) {
@@ -409,13 +423,15 @@ export async function POST(req: NextRequest) {
             })
           );
 
+          const h2hCtx = h2hMap.get(game.id);
+
           // --- Bot A ---
           let analysisA: GameAnalysisResult | null = null;
           let logsA: DecisionLog[] = [];
           const skipA = runA && botAState.gameIds.has(game.id);
           if (runA && !skipA) {
             console.log(`[analyze] Bot A analyzing ${game.away_team} @ ${game.home_team}`);
-            const { analysis, decisions } = await analyzeGameWithClaude(game, settings, "A", todayNotes, matchedPatterns, provenPatternsA.length > 0 ? provenPatternsA : undefined, sacrificePatternsA.length > 0 ? sacrificePatternsA : undefined);
+            const { analysis, decisions } = await analyzeGameWithClaude(game, settings, "A", todayNotes, matchedPatterns, provenPatternsA.length > 0 ? provenPatternsA : undefined, sacrificePatternsA.length > 0 ? sacrificePatternsA : undefined, h2hCtx);
             analysisA = analysis;
             logsA = await placeBots(supabase, game, decisions, analysis, "A", settings, botAState);
           } else if (skipA) {
@@ -428,7 +444,7 @@ export async function POST(req: NextRequest) {
           const skipB = runB && botBState.gameIds.has(game.id);
           if (runB && !skipB) {
             console.log(`[analyze] Bot B analyzing ${game.away_team} @ ${game.home_team}`);
-            const { analysis, decisions } = await analyzeGameWithClaude(game, botBSettings, "B", todayNotes, matchedPatterns, provenPatternsB.length > 0 ? provenPatternsB : undefined, sacrificePatternsB.length > 0 ? sacrificePatternsB : undefined);
+            const { analysis, decisions } = await analyzeGameWithClaude(game, botBSettings, "B", todayNotes, matchedPatterns, provenPatternsB.length > 0 ? provenPatternsB : undefined, sacrificePatternsB.length > 0 ? sacrificePatternsB : undefined, h2hCtx);
             analysisB = analysis;
             logsB = await placeBots(supabase, game, decisions, analysis, "B", settings, botBState);
           } else if (skipB) {
@@ -441,7 +457,7 @@ export async function POST(req: NextRequest) {
           const skipC = runC && botCState.gameIds.has(game.id);
           if (runC && !skipC) {
             console.log(`[analyze] Bot C analyzing ${game.away_team} @ ${game.home_team}`);
-            const { analysis, decisions } = await analyzeGameWithClaude(game, botCSettings, "C", todayNotes, matchedPatterns, provenPatternsC.length > 0 ? provenPatternsC : undefined, sacrificePatternsC.length > 0 ? sacrificePatternsC : undefined);
+            const { analysis, decisions } = await analyzeGameWithClaude(game, botCSettings, "C", todayNotes, matchedPatterns, provenPatternsC.length > 0 ? provenPatternsC : undefined, sacrificePatternsC.length > 0 ? sacrificePatternsC : undefined, h2hCtx);
             analysisC = analysis;
             logsC = await placeBots(supabase, game, decisions, analysis, "C", settings, botCState);
           } else if (skipC) {
@@ -454,7 +470,7 @@ export async function POST(req: NextRequest) {
           const skipD = runD && botDState.gameIds.has(game.id);
           if (runD && !skipD) {
             console.log(`[analyze] Bot D analyzing ${game.away_team} @ ${game.home_team}`);
-            const { analysis, decisions } = await analyzeGameWithClaude(game, botDSettings, "D", todayNotes, matchedPatterns, provenPatternsD.length > 0 ? provenPatternsD : undefined, sacrificePatternsD.length > 0 ? sacrificePatternsD : undefined);
+            const { analysis, decisions } = await analyzeGameWithClaude(game, botDSettings, "D", todayNotes, matchedPatterns, provenPatternsD.length > 0 ? provenPatternsD : undefined, sacrificePatternsD.length > 0 ? sacrificePatternsD : undefined, h2hCtx);
             console.log(`[bot-D] lockType=${analysis.lockType} engineConf=${analysis.confidence}% decisions=${decisions.length}`);
             decisions.forEach((d, i) => {
               console.log(`[bot-D] decision[${i}] action=${d.action} pick="${d.pick}" conf=${d.confidence}% odds=${d.odds} units=${d.units} effectiveLock=${confidenceToLockType(d.confidence)}`);

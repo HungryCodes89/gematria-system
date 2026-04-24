@@ -287,7 +287,8 @@ function buildUserMessage(
   matchedPatterns?: MatchedPattern[],
   provenPatterns?: ProvenPattern[],
   sacrificeLock?: boolean,
-  sacrificeSignals?: SacrificePattern[]
+  sacrificeSignals?: SacrificePattern[],
+  h2hContext?: string,
 ): string {
   const moonIll = getMoonIllumination(new Date(game.game_date + "T17:00:00Z"));
   const fullMoon = isFullMoon(game.game_date);
@@ -310,6 +311,7 @@ Venue: ${analysis.venue}
 Records: Home ${game.home_record ?? "N/A"} | Away ${game.away_record ?? "N/A"}
 Moon: ${(moonIll * 100).toFixed(0)}% illumination${fullMoon ? " (FULL MOON)" : ""}`
     );
+    if (h2hContext) sections.push(h2hContext);
     sections.push(`=== ODDS ===\n${formatOdds(game.polymarket_odds)}`);
     const sharpSection = formatSharpMoneySection(game.polymarket_odds, game.home_team, game.away_team);
     if (sharpSection) sections.push(sharpSection);
@@ -340,6 +342,8 @@ Venue: ${analysis.venue}
 Records: Home ${game.home_record ?? "N/A"} | Away ${game.away_record ?? "N/A"}
 Moon: ${(moonIll * 100).toFixed(0)}% illumination${fullMoon ? " (FULL MOON)" : ""}`
   );
+
+  if (h2hContext) sections.push(h2hContext);
 
   sections.push(
     `=== DATE NUMEROLOGY ===
@@ -501,7 +505,8 @@ export async function analyzeGameWithClaude(
   notes?: string,
   matchedPatterns?: MatchedPattern[],
   provenPatterns?: ProvenPattern[],
-  sacrificePatterns?: SacrificePattern[]
+  sacrificePatterns?: SacrificePattern[],
+  h2hContext?: string,
 ): Promise<{ analysis: GameAnalysisResult; decisions: TradeDecision[] }> {
   const gameDate = new Date(game.game_date + "T00:00:00");
 
@@ -586,7 +591,8 @@ export async function analyzeGameWithClaude(
   const systemMsg = buildSystemMessage(settings);
   const userMsg = buildUserMessage(
     game, engineResult, bot, notes, matchedPatterns, provenPatterns,
-    detectedSacrificeLock, matchedSacrificeSignals.length > 0 ? matchedSacrificeSignals : undefined
+    detectedSacrificeLock, matchedSacrificeSignals.length > 0 ? matchedSacrificeSignals : undefined,
+    h2hContext,
   );
 
   const client = new Anthropic();
