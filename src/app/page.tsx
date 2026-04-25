@@ -45,6 +45,40 @@ function MasterSpan({ value }: { value: number }) {
     : <span>{value}</span>;
 }
 
+/* Amber Flower-of-Life wax-seal sigil for Tier-1 lock cards */
+function WaxSealSigil() {
+  // R = petal radius; 6 petals at distance R from center in a 40×40 viewBox
+  const cx = 20, cy = 20, R = 6.5;
+  const petals = [
+    [cx,            cy - R        ],
+    [cx + R * 0.866, cy - R * 0.5 ],
+    [cx + R * 0.866, cy + R * 0.5 ],
+    [cx,            cy + R        ],
+    [cx - R * 0.866, cy + R * 0.5 ],
+    [cx - R * 0.866, cy - R * 0.5 ],
+  ] as [number, number][];
+
+  return (
+    <svg
+      width="40" height="40" viewBox="0 0 40 40" fill="none"
+      style={{ filter: "drop-shadow(0 0 5px rgba(212,165,116,0.7))", flexShrink: 0 }}
+    >
+      {/* Outer wax-seal rings */}
+      <circle cx={cx} cy={cy} r={17.5} stroke="#D4A574" strokeWidth="0.6" strokeOpacity="0.35" />
+      <circle cx={cx} cy={cy} r={14.5} stroke="#D4A574" strokeWidth="0.8" strokeOpacity="0.55" />
+
+      {/* FOL petals — 6 outer + center */}
+      {petals.map(([px, py], i) => (
+        <circle key={i} cx={px} cy={py} r={R} stroke="#D4A574" strokeWidth="0.65" strokeOpacity="0.75" />
+      ))}
+      <circle cx={cx} cy={cy} r={R} stroke="#D4A574" strokeWidth="0.65" strokeOpacity="0.75" />
+
+      {/* Inner dot */}
+      <circle cx={cx} cy={cy} r={1.4} fill="#D4A574" fillOpacity="0.6" />
+    </svg>
+  );
+}
+
 /* Flower-of-Life tiling for the hero strip background */
 function FlowerOfLifePattern() {
   return (
@@ -644,9 +678,12 @@ export default function Dashboard() {
             <div className="mb-6 card-lock">
               {/* ── Header ── */}
               <div className="flex items-center justify-between mb-4">
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.18em", color: "#D4A574" }}>
-                  PRIMARY LOCK · {String(1).padStart(2, "0")} / {String(realTrades.length).padStart(2, "0")}
-                </span>
+                <div className="flex items-center gap-2.5">
+                  <WaxSealSigil />
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.18em", color: "#D4A574" }}>
+                    PRIMARY LOCK · {String(1).padStart(2, "0")} / {String(realTrades.length).padStart(2, "0")}
+                  </span>
+                </div>
                 <div className="flex items-center gap-1.5">
                   <span
                     className="text-[10px] px-1.5 py-0.5 rounded"
@@ -673,56 +710,87 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* ── Cipher stack ── */}
+              {/* ── Cipher stack — LEFT amber (away) · RIGHT cyan (home) ── */}
               {game && awayG && homeG && (
                 <div style={{ position: "relative", marginBottom: 12 }}>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", columnGap: 12 }}>
-                    {/* Away cipher column */}
+
+                    {/* LEFT — away team, amber column */}
                     <div style={{ display: "flex", flexDirection: "column", gap: ROW_GAP, alignItems: "flex-end" }}>
                       {CIPHERS.map(({ label, key }) => {
                         const av = awayG[key];
                         const match = av === homeG[key];
                         return (
                           <div key={label} style={{ height: ROW_H, display: "flex", alignItems: "center", gap: 5 }}>
-                            <span style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: match ? "#5FC9D4" : "#4A4D54", letterSpacing: "0.1em" }}>{label}</span>
-                            <span style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 700, color: match ? "#5FC9D4" : "#8A8578" }}>{av}</span>
+                            <span style={{
+                              fontFamily: "var(--font-mono)", fontSize: 8, letterSpacing: "0.1em",
+                              color: match ? "#D4A574" : "#5C3D18",
+                            }}>{label}</span>
+                            <span style={{
+                              fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 700,
+                              color: match ? "#F4B860" : "#D4A574",
+                              textShadow: match ? "0 0 8px rgba(244,184,96,0.6)" : "none",
+                            }}>{av}</span>
                           </div>
                         );
                       })}
                     </div>
 
-                    {/* Center: team matchup */}
+                    {/* CENTER — team matchup */}
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: stackH, textAlign: "center", minWidth: 80 }}>
-                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "#8A8578", lineHeight: 1.4 }}>{game.away_team}</span>
+                      <span style={{
+                        fontFamily: "var(--font-mono)", fontSize: 9, lineHeight: 1.4,
+                        color: best.pickedSide === "away" ? "#F4B860" : "#8A8578",
+                        fontWeight: best.pickedSide === "away" ? 700 : 400,
+                      }}>{game.away_team}</span>
                       <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "#4A4D54", margin: "2px 0" }}>@</span>
-                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "#8A8578", lineHeight: 1.4 }}>{game.home_team}</span>
+                      <span style={{
+                        fontFamily: "var(--font-mono)", fontSize: 9, lineHeight: 1.4,
+                        color: best.pickedSide === "home" ? "#5FC9D4" : "#8A8578",
+                        fontWeight: best.pickedSide === "home" ? 700 : 400,
+                      }}>{game.home_team}</span>
                     </div>
 
-                    {/* Home cipher column */}
+                    {/* RIGHT — home team, cyan column */}
                     <div style={{ display: "flex", flexDirection: "column", gap: ROW_GAP, alignItems: "flex-start" }}>
                       {CIPHERS.map(({ label, key }) => {
                         const hv = homeG[key];
                         const match = awayG[key] === hv;
                         return (
                           <div key={label} style={{ height: ROW_H, display: "flex", alignItems: "center", gap: 5 }}>
-                            <span style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 700, color: match ? "#5FC9D4" : "#8A8578" }}>{hv}</span>
-                            <span style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: match ? "#5FC9D4" : "#4A4D54", letterSpacing: "0.1em" }}>{label}</span>
+                            <span style={{
+                              fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 700,
+                              color: match ? "#7FE8F0" : "#5FC9D4",
+                              textShadow: match ? "0 0 8px rgba(95,201,212,0.6)" : "none",
+                            }}>{hv}</span>
+                            <span style={{
+                              fontFamily: "var(--font-mono)", fontSize: 8, letterSpacing: "0.1em",
+                              color: match ? "#5FC9D4" : "#1C5A62",
+                            }}>{label}</span>
                           </div>
                         );
                       })}
                     </div>
                   </div>
 
-                  {/* Hairline connectors across matching cipher rows */}
+                  {/* Hairline connectors on matching rows */}
                   <svg
                     aria-hidden="true"
                     style={{ position: "absolute", top: 0, left: 0, width: "100%", height: stackH, pointerEvents: "none", overflow: "visible" }}
                   >
+                    <defs>
+                      <linearGradient id="connector-grad" x1="0" y1="0" x2="100%" y2="0">
+                        <stop offset="0%"   stopColor="#F4B860" stopOpacity="0.6" />
+                        <stop offset="50%"  stopColor="#F4B860" stopOpacity="0.15" />
+                        <stop offset="100%" stopColor="#7FE8F0" stopOpacity="0.6" />
+                      </linearGradient>
+                    </defs>
                     {CIPHERS.map(({ label, key }, i) => {
                       if (awayG[key] !== homeG[key]) return null;
                       const y = i * (ROW_H + ROW_GAP) + ROW_H / 2;
                       return (
-                        <line key={label} x1="0" y1={y} x2="100%" y2={y} stroke="#5FC9D4" strokeWidth="0.5" strokeOpacity="0.25" />
+                        <line key={label} x1="0" y1={y} x2="100%" y2={y}
+                          stroke="url(#connector-grad)" strokeWidth="0.75" />
                       );
                     })}
                   </svg>
