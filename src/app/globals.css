@@ -233,6 +233,11 @@
   to   { transform: rotate(360deg); }
 }
 
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
 @keyframes amber-ping {
   0%   { box-shadow: 0 0 0 0 rgba(212, 165, 116, 0.55); }
   100% { box-shadow: 0 0 0 10px rgba(212, 165, 116, 0); }
