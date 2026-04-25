@@ -18,6 +18,8 @@ import type { GameAnalysisResult, MatchedPattern, ProvenPattern, SacrificePatter
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
+// No legacy "picks" table exists in this codebase — all trades go through paper_trades only.
+
 const AUTO_BET_MAP: Record<LockType, keyof GematriaSettings | null> = {
   triple_lock:    "auto_bet_triple_locks",
   double_lock:    "auto_bet_double_locks",
@@ -66,7 +68,7 @@ interface DecisionLog {
   dbError?: string;
 }
 
-// ── Bot Reconciliation Helpers ─────────────────────────────────────────────
+// ── Reconciliation Helpers ─────────────────────────────────────────────────
 
 function groupBy<T>(arr: T[], key: (item: T) => string): Record<string, T[]> {
   return arr.reduce((acc, item) => {
@@ -76,54 +78,69 @@ function groupBy<T>(arr: T[], key: (item: T) => string): Record<string, T[]> {
   }, {} as Record<string, T[]>);
 }
 
-function lockTierToUnits(lockType: string): number {
-  if (lockType === "triple_lock" || lockType === "sacrifice_lock") return 3;
-  if (lockType === "double_lock") return 2;
-  if (lockType === "single_lock") return 1;
-  return 0;
+function roundToNearest025(n: number): number {
+  return Math.round(n * 4) / 4;
 }
 
-function logSkip(gameId: string, reason: string, decisions: BotDecision[]): void {
-  const bots = decisions.map(d => `Bot${d.bot}→${d.picked_side ?? "null"}`).join(", ");
-  console.log(`[reconcile] SKIP game=${gameId} reason=${reason} decisions=[${bots}]`);
+function formatUnits(n: number): string {
+  return String(parseFloat(n.toFixed(4)));
 }
 
+// Returns null + logs disagreement; caller writes to skipped_picks.
 function reconcileBotDecisions(decisions: BotDecision[], game: Game): ReconciledDecision | null {
   const bySide = groupBy(decisions, d => d.picked_side ?? "null");
   const sides = Object.keys(bySide);
+
   if (sides.length > 1) {
-    logSkip(game.id, "bot_disagreement", decisions);
+    const bots = decisions.map(d => `Bot${d.bot}→${d.picked_side ?? "null"}`).join(", ");
+    console.log(`[reconcile] DISAGREE game=${game.id} sides=[${sides.join(",")}] decisions=[${bots}]`);
     return null;
   }
+
   const winningSide = sides[0]!;
   const botPicks = bySide[winningSide]!;
-  const topBot = botPicks.reduce((a, b) => a.units > b.units ? a : b);
+
+  // Use lowest-units bot — convergence adds no edge (60.0% vs 60.9% single-bot), so no bonus stake.
+  const lowestBot = botPicks.reduce((a, b) => a.units < b.units ? a : b);
+  const baseUnits = lowestBot.units;
+
+  const botBreakdown = botPicks.length > 1
+    ? `lowest of ${botPicks.map(b => `${b.bot}:${formatUnits(b.units)}`).join(", ")}`
+    : null;
+  const baseSizingNote = botBreakdown
+    ? `base ${formatUnits(baseUnits)}u from bot ${lowestBot.bot} (${botBreakdown})`
+    : `base ${formatUnits(baseUnits)}u from bot ${lowestBot.bot}`;
+
   return {
-    ...topBot,
+    ...lowestBot,
+    units: baseUnits,
     convergence_count: botPicks.length,
     convergent_bots: botPicks.map(b => b.bot),
-    sizing_note: null,
+    sizing_note: baseSizingNote,
   };
 }
 
 function sizeWithPriceModifier(decision: ReconciledDecision): ReconciledDecision {
-  const baseUnits = lockTierToUnits(decision.lock_type);
+  const baseUnits = decision.units;
+  const oddsStr = decision.odds > 0 ? `+${decision.odds}` : `${decision.odds}`;
+
   let priceModifier = 1.0;
   if (decision.bet_type === "moneyline") {
     if (decision.odds >= 300)        priceModifier = 0.25;
     else if (decision.odds >= 200)   priceModifier = 0.5;
     else if (decision.odds >= 150)   priceModifier = 0.75;
   }
-  return {
-    ...decision,
-    units: baseUnits * priceModifier,
-    sizing_note: priceModifier < 1.0
-      ? `base ${baseUnits}u × ${priceModifier} (price modifier @ ${decision.odds}) = ${baseUnits * priceModifier}u`
-      : null,
-  };
+
+  const finalUnits = roundToNearest025(baseUnits * priceModifier);
+
+  const sizingNote = priceModifier < 1.0
+    ? `${decision.sizing_note} → price modifier ${priceModifier} @ ${oddsStr} → final ${formatUnits(finalUnits)}u`
+    : `${decision.sizing_note} → final ${formatUnits(finalUnits)}u`;
+
+  return { ...decision, units: finalUnits, sizing_note: sizingNote };
 }
 
-// ── Gather (gate-check without placing) ───────────────────────────────────
+// ── Gather (gate-check, no DB writes for eligible bets) ───────────────────
 
 interface GatheredResult {
   logs: DecisionLog[];
@@ -161,6 +178,7 @@ async function gatherEligibleBets(
       confidence: decision.confidence,
       lock_type: lockType,
       reasoning: decision.reasoning,
+      was_reconciled: false,
       placed_at: new Date().toISOString(),
     }, { onConflict: "game_id,bet_type,bot" });
 
@@ -223,7 +241,7 @@ async function gatherEligibleBets(
       continue;
     }
 
-    // Passed all gates — defer to reconciliation step
+    // Passed all gates — defer to reconciliation
     betDecisions.push({
       bot,
       lock_type: effectiveLockType,
@@ -244,40 +262,30 @@ async function gatherEligibleBets(
   return { logs, betDecisions };
 }
 
-// ── Save analysis records for reconciliation-rejected eligibles ────────────
+// ── Write disagreement to skipped_picks ──────────────────────────────────
 
-async function saveAnalysisRecordsForRejected(
+async function writeSkippedPick(
   supabase: ReturnType<typeof getSupabaseAdmin>,
-  game: Game,
+  gameId: string,
+  reason: string,
   decisions: BotDecision[]
 ): Promise<void> {
-  for (const d of decisions) {
-    await supabase.from("paper_trades").upsert({
-      game_id: game.id,
-      bot: d.bot,
-      bet_type: "analysis",
-      pick: d.pick,
-      picked_side: d.picked_side,
-      odds: null,
-      implied_probability: null,
-      model_probability: null,
-      ev: null,
-      units: 0,
-      stake: 0,
-      potential_profit: 0,
-      result: "pass",
-      profit_loss: 0,
-      confidence: d.confidence,
-      lock_type: d.lock_type,
-      reasoning: d.reasoning,
-      placed_at: new Date().toISOString(),
-    }, { onConflict: "game_id,bet_type,bot" });
+  const { error } = await supabase.from("skipped_picks").insert({
+    game_id: gameId,
+    reason,
+    bot_decisions: decisions as unknown as object,
+    created_at: new Date().toISOString(),
+  });
+  if (error) {
+    console.error(`[reconcile] skipped_picks write failed: ${error.message}`);
   }
 }
 
-// ── Place the single reconciled bet ───────────────────────────────────────
+// ── Place the single reconciled trade ────────────────────────────────────
 
-type BotStates = Record<"A" | "B" | "C" | "D", { balance: number; dailyUnits: number; betsPlaced: number; gameIds: Set<string> }>;
+type BotStates = Record<"A" | "B" | "C" | "D", {
+  balance: number; dailyUnits: number; betsPlaced: number; gameIds: Set<string>;
+}>;
 
 async function placeReconciledBet(
   supabase: ReturnType<typeof getSupabaseAdmin>,
@@ -292,13 +300,6 @@ async function placeReconciledBet(
     decision.odds > 0
       ? stake * (decision.odds / 100)
       : stake * (100 / Math.abs(decision.odds));
-
-  const convergenceNote =
-    decision.convergence_count > 1
-      ? `\n\n[BOT CONSENSUS: ${decision.convergence_count} bots (${decision.convergent_bots.join(",")})${decision.sizing_note ? ` | SIZING: ${decision.sizing_note}` : ""}]`
-      : decision.sizing_note
-        ? `\n\n[SIZING: ${decision.sizing_note}]`
-        : "";
 
   const { error: insertErr } = await supabase
     .from("paper_trades")
@@ -319,9 +320,14 @@ async function placeReconciledBet(
       profit_loss: 0,
       confidence: decision.confidence,
       lock_type: decision.lock_type,
-      reasoning: `${decision.reasoning}${convergenceNote}`,
+      reasoning: decision.reasoning,
       opening_line: extractOpeningLine(game, decision.bet_type, decision.picked_side),
       strategy_version: "v1",
+      // Reconciliation columns (migration 010)
+      convergence_count: decision.convergence_count,
+      convergent_bots: decision.convergent_bots,
+      sizing_note: decision.sizing_note,
+      was_reconciled: true,
       placed_at: new Date().toISOString(),
     })
     .select("id")
@@ -332,11 +338,17 @@ async function placeReconciledBet(
     state.dailyUnits += decision.units;
     state.betsPlaced++;
     state.gameIds.add(game.id);
-    console.log(`[reconcile] PLACED — ${decision.pick} ${decision.units}u @ ${decision.odds} lock=${decision.lock_type} bots=[${decision.convergent_bots.join(",")}] count=${decision.convergence_count}${decision.sizing_note ? ` sizing=${decision.sizing_note}` : ""}`);
+    console.log(
+      `[reconcile] PLACED — ${decision.pick} ${decision.units}u @ ${decision.odds > 0 ? "+" : ""}${decision.odds}` +
+      ` lock=${decision.lock_type} bots=[${decision.convergent_bots.join(",")}]` +
+      ` sizing="${decision.sizing_note}"`
+    );
     return true;
   } else {
     console.error(`[reconcile] DB INSERT FAILED for game ${game.id}: ${insertErr.message}`);
-    console.error(`[reconcile] If error mentions 'bot_check' constraint run: ALTER TABLE paper_trades DROP CONSTRAINT paper_trades_bot_check; ALTER TABLE paper_trades ADD CONSTRAINT paper_trades_bot_check CHECK (bot IN ('A','B','C','D'));`);
+    if (insertErr.message.includes("bot_check")) {
+      console.error(`[reconcile] Run: ALTER TABLE paper_trades DROP CONSTRAINT paper_trades_bot_check; ALTER TABLE paper_trades ADD CONSTRAINT paper_trades_bot_check CHECK (bot IN ('A','B','C','D'));`);
+    }
     return false;
   }
 }
@@ -389,11 +401,11 @@ export async function POST(req: NextRequest) {
   const runD = (botParam === "all" || botParam === "D") && Boolean(settings.bot_d_system_prompt);
 
   if (gameIdParam) {
-    await supabase.from("games").update({ analyzed: false }).eq("id", gameIdParam);
-    await supabase.from("paper_trades")
-      .delete()
-      .eq("game_id", gameIdParam)
-      .eq("bet_type", "analysis");
+    await Promise.all([
+      supabase.from("games").update({ analyzed: false }).eq("id", gameIdParam),
+      supabase.from("paper_trades").delete().eq("game_id", gameIdParam).eq("bet_type", "analysis"),
+      supabase.from("skipped_picks").delete().eq("game_id", gameIdParam),
+    ]);
   }
 
   const forceReanalyze = Boolean(gameIdParam);
@@ -487,32 +499,24 @@ export async function POST(req: NextRequest) {
 
   const balance = ledgerRow?.balance ?? settings.starting_bankroll;
 
-  const [botARes, botBRes, botCRes, botDRes] = await Promise.all([
-    supabase
-      .from("paper_trades")
-      .select("units, game_id")
-      .eq("bot", "A")
-      .gte("placed_at", `${today}T00:00:00`)
-      .lt("placed_at", `${today}T23:59:59.999`),
-    supabase
-      .from("paper_trades")
-      .select("units, game_id")
-      .eq("bot", "B")
-      .gte("placed_at", `${today}T00:00:00`)
-      .lt("placed_at", `${today}T23:59:59.999`),
-    supabase
-      .from("paper_trades")
-      .select("units, game_id")
-      .eq("bot", "C")
-      .gte("placed_at", `${today}T00:00:00`)
-      .lt("placed_at", `${today}T23:59:59.999`),
-    supabase
-      .from("paper_trades")
-      .select("units, game_id")
-      .eq("bot", "D")
-      .gte("placed_at", `${today}T00:00:00`)
-      .lt("placed_at", `${today}T23:59:59.999`),
+  // Fetch today's bot trades + today's skipped picks for cross-session dedup.
+  // A game in skipped_picks was already reconciled (disagreement) — don't re-run it.
+  const [botARes, botBRes, botCRes, botDRes, skippedRes] = await Promise.all([
+    supabase.from("paper_trades").select("units, game_id").eq("bot", "A")
+      .gte("placed_at", `${today}T00:00:00`).lt("placed_at", `${today}T23:59:59.999`),
+    supabase.from("paper_trades").select("units, game_id").eq("bot", "B")
+      .gte("placed_at", `${today}T00:00:00`).lt("placed_at", `${today}T23:59:59.999`),
+    supabase.from("paper_trades").select("units, game_id").eq("bot", "C")
+      .gte("placed_at", `${today}T00:00:00`).lt("placed_at", `${today}T23:59:59.999`),
+    supabase.from("paper_trades").select("units, game_id").eq("bot", "D")
+      .gte("placed_at", `${today}T00:00:00`).lt("placed_at", `${today}T23:59:59.999`),
+    supabase.from("skipped_picks").select("game_id")
+      .gte("created_at", `${today}T00:00:00`).lt("created_at", `${today}T23:59:59.999`),
   ]);
+
+  const skippedGameIds = new Set<string>(
+    (skippedRes.data ?? []).map((s: { game_id: string }) => s.game_id).filter(Boolean)
+  );
 
   const botAState = {
     balance,
@@ -542,8 +546,13 @@ export async function POST(req: NextRequest) {
   console.log(`[analyze] Bot B today: ${botBState.dailyUnits}u, ${botBState.gameIds.size} games`);
   console.log(`[analyze] Bot C today: ${botCState.dailyUnits}u, ${botCState.gameIds.size} games`);
   console.log(`[analyze] Bot D today: ${botDState.dailyUnits}u, ${botDState.gameIds.size} games`);
+  console.log(`[analyze] Skipped games today (cross-session dedup): ${skippedGameIds.size}`);
 
   const botStates: BotStates = { A: botAState, B: botBState, C: botCState, D: botDState };
+
+  // Helper — already-seen check that includes the skipped_picks dedup
+  const alreadyProcessed = (gameId: string, botGameIds: Set<string>) =>
+    botGameIds.has(gameId) || skippedGameIds.has(gameId);
 
   const total = unanalyzed.length;
   let analyzed = 0;
@@ -567,14 +576,7 @@ export async function POST(req: NextRequest) {
         const game = unanalyzed[i]!;
 
         try {
-          controller.enqueue(
-            sse({
-              game: i + 1,
-              total,
-              status: "analyzing",
-              teams: `${game.away_team} at ${game.home_team}`,
-            })
-          );
+          controller.enqueue(sse({ game: i + 1, total, status: "analyzing", teams: `${game.away_team} at ${game.home_team}` }));
 
           const h2hCtx = h2hMap.get(game.id);
 
@@ -582,94 +584,89 @@ export async function POST(req: NextRequest) {
           let analysisA: GameAnalysisResult | null = null;
           let logsA: DecisionLog[] = [];
           let betDecisionsA: BotDecision[] = [];
-          const skipA = runA && !forceReanalyze && botAState.gameIds.has(game.id);
+          const skipA = runA && !forceReanalyze && alreadyProcessed(game.id, botAState.gameIds);
           if (runA && !skipA) {
             console.log(`[analyze] Bot A analyzing ${game.away_team} @ ${game.home_team}`);
             const { analysis, decisions } = await analyzeGameWithClaude(game, settings, "A", todayNotes, matchedPatterns, provenPatternsA.length > 0 ? provenPatternsA : undefined, sacrificePatternsA.length > 0 ? sacrificePatternsA : undefined, h2hCtx);
             analysisA = analysis;
-            const gatheredA = await gatherEligibleBets(supabase, game, decisions, analysis, "A", settings, botAState);
-            logsA = gatheredA.logs;
-            betDecisionsA = gatheredA.betDecisions;
+            const g = await gatherEligibleBets(supabase, game, decisions, analysis, "A", settings, botAState);
+            logsA = g.logs; betDecisionsA = g.betDecisions;
           } else if (skipA) {
-            console.log(`[analyze] Bot A skip — already bet game ${game.id}`);
+            console.log(`[analyze] Bot A skip — already processed game ${game.id}`);
           }
 
           // --- Bot B ---
           let analysisB: GameAnalysisResult | null = null;
           let logsB: DecisionLog[] = [];
           let betDecisionsB: BotDecision[] = [];
-          const skipB = runB && !forceReanalyze && botBState.gameIds.has(game.id);
+          const skipB = runB && !forceReanalyze && alreadyProcessed(game.id, botBState.gameIds);
           if (runB && !skipB) {
             console.log(`[analyze] Bot B analyzing ${game.away_team} @ ${game.home_team}`);
             const { analysis, decisions } = await analyzeGameWithClaude(game, botBSettings, "B", todayNotes, matchedPatterns, provenPatternsB.length > 0 ? provenPatternsB : undefined, sacrificePatternsB.length > 0 ? sacrificePatternsB : undefined, h2hCtx);
             analysisB = analysis;
-            const gatheredB = await gatherEligibleBets(supabase, game, decisions, analysis, "B", settings, botBState);
-            logsB = gatheredB.logs;
-            betDecisionsB = gatheredB.betDecisions;
+            const g = await gatherEligibleBets(supabase, game, decisions, analysis, "B", settings, botBState);
+            logsB = g.logs; betDecisionsB = g.betDecisions;
           } else if (skipB) {
-            console.log(`[analyze] Bot B skip — already bet game ${game.id}`);
+            console.log(`[analyze] Bot B skip — already processed game ${game.id}`);
           }
 
           // --- Bot C (AJ Wordplay) ---
           let analysisC: GameAnalysisResult | null = null;
           let logsC: DecisionLog[] = [];
           let betDecisionsC: BotDecision[] = [];
-          const skipC = runC && !forceReanalyze && botCState.gameIds.has(game.id);
+          const skipC = runC && !forceReanalyze && alreadyProcessed(game.id, botCState.gameIds);
           if (runC && !skipC) {
             console.log(`[analyze] Bot C analyzing ${game.away_team} @ ${game.home_team}`);
             const { analysis, decisions } = await analyzeGameWithClaude(game, botCSettings, "C", todayNotes, matchedPatterns, provenPatternsC.length > 0 ? provenPatternsC : undefined, sacrificePatternsC.length > 0 ? sacrificePatternsC : undefined, h2hCtx);
             analysisC = analysis;
-            const gatheredC = await gatherEligibleBets(supabase, game, decisions, analysis, "C", settings, botCState);
-            logsC = gatheredC.logs;
-            betDecisionsC = gatheredC.betDecisions;
+            const g = await gatherEligibleBets(supabase, game, decisions, analysis, "C", settings, botCState);
+            logsC = g.logs; betDecisionsC = g.betDecisions;
           } else if (skipC) {
-            console.log(`[analyze] Bot C skip — already bet game ${game.id}`);
+            console.log(`[analyze] Bot C skip — already processed game ${game.id}`);
           }
 
           // --- Bot D (Narrative Scout) ---
           let analysisD: GameAnalysisResult | null = null;
           let logsD: DecisionLog[] = [];
           let betDecisionsD: BotDecision[] = [];
-          const skipD = runD && !forceReanalyze && botDState.gameIds.has(game.id);
+          const skipD = runD && !forceReanalyze && alreadyProcessed(game.id, botDState.gameIds);
           if (runD && !skipD) {
             console.log(`[analyze] Bot D analyzing ${game.away_team} @ ${game.home_team}`);
             const { analysis, decisions } = await analyzeGameWithClaude(game, botDSettings, "D", todayNotes, matchedPatterns, provenPatternsD.length > 0 ? provenPatternsD : undefined, sacrificePatternsD.length > 0 ? sacrificePatternsD : undefined, h2hCtx);
             console.log(`[bot-D] lockType=${analysis.lockType} engineConf=${analysis.confidence}% decisions=${decisions.length}`);
-            decisions.forEach((d, i) => {
-              console.log(`[bot-D] decision[${i}] action=${d.action} pick="${d.pick}" conf=${d.confidence}% odds=${d.odds} units=${d.units} effectiveLock=${confidenceToLockType(d.confidence)}`);
+            decisions.forEach((dv, ii) => {
+              console.log(`[bot-D] decision[${ii}] action=${dv.action} pick="${dv.pick}" conf=${dv.confidence}% odds=${dv.odds} units=${dv.units} effectiveLock=${confidenceToLockType(dv.confidence)}`);
             });
             analysisD = analysis;
-            const gatheredD = await gatherEligibleBets(supabase, game, decisions, analysis, "D", settings, botDState);
-            logsD = gatheredD.logs;
-            betDecisionsD = gatheredD.betDecisions;
+            const g = await gatherEligibleBets(supabase, game, decisions, analysis, "D", settings, botDState);
+            logsD = g.logs; betDecisionsD = g.betDecisions;
           } else if (skipD) {
-            console.log(`[analyze] Bot D skip — already bet game ${game.id}`);
+            console.log(`[analyze] Bot D skip — already processed game ${game.id}`);
           } else if (!runD) {
             console.log(`[analyze] Bot D disabled — botParam=${botParam} bot_d_prompt_set=${Boolean(settings.bot_d_system_prompt)}`);
           }
 
-          // --- Reconcile & Place ---
-          const allBetDecisions = [...betDecisionsA, ...betDecisionsB, ...betDecisionsC, ...betDecisionsD];
+          // ── Reconcile & Place ──────────────────────────────────────────
+          const allBetDecisions = [
+            ...betDecisionsA, ...betDecisionsB, ...betDecisionsC, ...betDecisionsD,
+          ];
+          let reconcileOutcome: "no_eligible_bets" | "skipped" | "placed" = "no_eligible_bets";
+
           if (allBetDecisions.length > 0) {
             const reconciled = reconcileBotDecisions(allBetDecisions, game);
+
             if (reconciled === null) {
-              // Bots disagree — save analysis records so all bots are deduped on re-run
-              await saveAnalysisRecordsForRejected(supabase, game, allBetDecisions);
+              // Bots disagree — log to skipped_picks, write NO trade
+              await writeSkippedPick(supabase, game.id, "bot_disagreement", allBetDecisions);
+              skippedGameIds.add(game.id); // dedup within this session
+              reconcileOutcome = "skipped";
             } else {
               const sized = sizeWithPriceModifier(reconciled);
-              const placed = await placeReconciledBet(supabase, game, sized, settings, botStates);
-              if (placed) {
-                // Save analysis records for non-winning bots so they dedup on re-run
-                const nonWinners = allBetDecisions.filter(d => d.bot !== sized.bot);
-                if (nonWinners.length > 0) {
-                  await saveAnalysisRecordsForRejected(supabase, game, nonWinners);
-                }
-              } else {
-                // Placement failed — save analysis records for all
-                await saveAnalysisRecordsForRejected(supabase, game, allBetDecisions);
-              }
+              await placeReconciledBet(supabase, game, sized, settings, botStates);
+              reconcileOutcome = "placed";
             }
           }
+          // ──────────────────────────────────────────────────────────────
 
           const primaryAnalysis = analysisA ?? analysisB ?? analysisC ?? analysisD;
           const anyBotRan = analysisA || analysisB || analysisC || analysisD;
@@ -686,42 +683,33 @@ export async function POST(req: NextRequest) {
           }
 
           analyzed++;
-          controller.enqueue(
-            sse({
-              game: i + 1,
-              total,
-              status: "complete",
-              teams: `${game.away_team} at ${game.home_team}`,
-              lockType: primaryAnalysis?.lockType,
-              confidence: primaryAnalysis?.confidence,
-              botB: runB ? { lockType: analysisB?.lockType, confidence: analysisB?.confidence } : null,
-              botC: runC ? { lockType: analysisC?.lockType, confidence: analysisC?.confidence } : null,
-              botD: runD ? { lockType: analysisD?.lockType, confidence: analysisD?.confidence } : null,
-              decisionLogs: {
-                A: runA ? logsA : null,
-                B: runB ? logsB : null,
-                C: runC ? logsC : null,
-                D: runD ? logsD : null,
-              },
-            })
-          );
+          controller.enqueue(sse({
+            game: i + 1,
+            total,
+            status: "complete",
+            teams: `${game.away_team} at ${game.home_team}`,
+            lockType: primaryAnalysis?.lockType,
+            confidence: primaryAnalysis?.confidence,
+            reconciled: reconcileOutcome,
+            botB: runB ? { lockType: analysisB?.lockType, confidence: analysisB?.confidence } : null,
+            botC: runC ? { lockType: analysisC?.lockType, confidence: analysisC?.confidence } : null,
+            botD: runD ? { lockType: analysisD?.lockType, confidence: analysisD?.confidence } : null,
+            decisionLogs: {
+              A: runA ? logsA : null,
+              B: runB ? logsB : null,
+              C: runC ? logsC : null,
+              D: runD ? logsD : null,
+            },
+          }));
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           errors.push(`${game.away_team} @ ${game.home_team}: ${msg}`);
-
-          controller.enqueue(
-            sse({
-              game: i + 1,
-              total,
-              status: "error",
-              teams: `${game.away_team} at ${game.home_team}`,
-              error: msg,
-            })
-          );
+          controller.enqueue(sse({ game: i + 1, total, status: "error", teams: `${game.away_team} at ${game.home_team}`, error: msg }));
         }
       }
 
-      const totalBets = botAState.betsPlaced + botBState.betsPlaced + botCState.betsPlaced + botDState.betsPlaced;
+      const totalBets =
+        botAState.betsPlaced + botBState.betsPlaced + botCState.betsPlaced + botDState.betsPlaced;
       const activeBalances = [
         runA ? botAState.balance : null,
         runB ? botBState.balance : null,
@@ -731,36 +719,27 @@ export async function POST(req: NextRequest) {
       const lowestBalance = activeBalances.length > 0 ? Math.min(...activeBalances) : balance;
 
       await supabase.from("bankroll_ledger").upsert(
-        {
-          date: today,
-          balance: lowestBalance,
-          daily_pl: 0,
-          wins: 0,
-          losses: 0,
-          bets_placed: totalBets,
-        },
+        { date: today, balance: lowestBalance, daily_pl: 0, wins: 0, losses: 0, bets_placed: totalBets },
         { onConflict: "date" }
       );
 
-      controller.enqueue(
-        sse({
-          done: true,
-          analyzed,
-          betsPlaced: totalBets,
-          botA: { bets: botAState.betsPlaced, enabled: runA },
-          botB: { bets: botBState.betsPlaced, enabled: runB },
-          botC: { bets: botCState.betsPlaced, enabled: runC },
-          botD: { bets: botDState.betsPlaced, enabled: runD },
-          errors,
-          settingsSnapshot: {
-            model: settings.model,
-            min_confidence: settings.min_confidence,
-            auto_bet_triple_locks: settings.auto_bet_triple_locks,
-            auto_bet_double_locks: settings.auto_bet_double_locks,
-            auto_bet_single_locks: settings.auto_bet_single_locks,
-          },
-        })
-      );
+      controller.enqueue(sse({
+        done: true,
+        analyzed,
+        betsPlaced: totalBets,
+        botA: { bets: botAState.betsPlaced, enabled: runA },
+        botB: { bets: botBState.betsPlaced, enabled: runB },
+        botC: { bets: botCState.betsPlaced, enabled: runC },
+        botD: { bets: botDState.betsPlaced, enabled: runD },
+        errors,
+        settingsSnapshot: {
+          model: settings.model,
+          min_confidence: settings.min_confidence,
+          auto_bet_triple_locks: settings.auto_bet_triple_locks,
+          auto_bet_double_locks: settings.auto_bet_double_locks,
+          auto_bet_single_locks: settings.auto_bet_single_locks,
+        },
+      }));
       controller.close();
     },
   });

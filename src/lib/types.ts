@@ -119,6 +119,11 @@ export interface PaperTrade {
   strategy_version: string;
   placed_at: string;
   settled_at: string | null;
+  // Reconciliation columns (migration 010)
+  convergence_count: number | null;
+  convergent_bots: string[] | null;
+  sizing_note: string | null;
+  was_reconciled: boolean | null;
   game?: Game;
 }
 
@@ -243,5 +248,15 @@ export interface BotDecision {
 export interface ReconciledDecision extends BotDecision {
   convergence_count: number;
   convergent_bots: ("A" | "B" | "C" | "D")[];
-  sizing_note: string | null;
+  sizing_note: string;  // always populated — describes the full sizing trace
+}
+
+// ── Skipped Pick (logged on bot_disagreement) ──
+
+export interface SkippedPick {
+  id: string;
+  game_id: string;
+  reason: string;
+  bot_decisions: BotDecision[] | null;
+  created_at: string;
 }
