@@ -78,6 +78,29 @@ async function placeBots(
 ): Promise<DecisionLog[]> {
   const logs: DecisionLog[] = [];
 
+  // Always surface Claude's reasoning even when a bet is gated (lock type, settings, confidence, limits).
+  const saveAnalysisRecord = (decision: TradeDecision, lockType: string) =>
+    supabase.from("paper_trades").upsert({
+      game_id: game.id,
+      bot,
+      bet_type: "analysis",
+      pick: decision.pick || "Pass",
+      picked_side: decision.pickedSide ?? null,
+      odds: null,
+      implied_probability: null,
+      model_probability: null,
+      ev: null,
+      units: 0,
+      stake: 0,
+      potential_profit: 0,
+      result: "pass",
+      profit_loss: 0,
+      confidence: decision.confidence,
+      lock_type: lockType,
+      reasoning: decision.reasoning,
+      placed_at: new Date().toISOString(),
+    }, { onConflict: "game_id,bet_type,bot" });
+
   for (let idx = 0; idx < decisions.length; idx++) {
     const decision = decisions[idx]!;
     const base = {
@@ -134,18 +157,21 @@ async function placeBots(
     if (!autoBetKey) {
       const reason = `${bot === "A" ? "Engine" : "Claude"}: ${effectiveLockType} — no auto-bet for no_lock`;
       console.log(`[placeBots] Bot ${bot} [${idx}] SKIP — ${reason}`);
+      await saveAnalysisRecord(decision, effectiveLockType);
       logs.push({ ...base, placed: false, skipReason: reason });
       continue;
     }
     if (!settings[autoBetKey]) {
       const reason = `Auto-bet disabled for ${effectiveLockType} (settings.${autoBetKey}=false)`;
       console.log(`[placeBots] Bot ${bot} [${idx}] SKIP — ${reason}`);
+      await saveAnalysisRecord(decision, effectiveLockType);
       logs.push({ ...base, placed: false, skipReason: reason });
       continue;
     }
     if (decision.confidence < settings.min_confidence) {
       const reason = `Claude confidence ${decision.confidence}% < min_confidence ${settings.min_confidence}%`;
       console.log(`[placeBots] Bot ${bot} [${idx}] SKIP — ${reason}`);
+      await saveAnalysisRecord(decision, effectiveLockType);
       logs.push({ ...base, placed: false, skipReason: reason });
       continue;
     }
@@ -153,6 +179,7 @@ async function placeBots(
       const stake = calculateStake(decision.units, settings.unit_size);
       const reason = `Limit hit: balance=$${state.balance} stake=$${stake} dailyUnits=${state.dailyUnits}/${settings.max_daily_units}`;
       console.log(`[placeBots] Bot ${bot} [${idx}] SKIP — ${reason}`);
+      await saveAnalysisRecord(decision, effectiveLockType);
       logs.push({ ...base, placed: false, skipReason: reason });
       continue;
     }
@@ -257,10 +284,17 @@ export async function POST(req: NextRequest) {
   const runC = (botParam === "all" || botParam === "C") && Boolean(settings.bot_c_system_prompt);
   const runD = (botParam === "all" || botParam === "D") && Boolean(settings.bot_d_system_prompt);
 
-  // Single-game re-analyze: reset analyzed flag so it gets re-processed
+  // Single-game re-analyze: reset analyzed flag and wipe existing analysis records
+  // so the dedup check doesn't skip the game on re-run.
   if (gameIdParam) {
     await supabase.from("games").update({ analyzed: false }).eq("id", gameIdParam);
+    await supabase.from("paper_trades")
+      .delete()
+      .eq("game_id", gameIdParam)
+      .eq("bet_type", "analysis");
   }
+
+  const forceReanalyze = Boolean(gameIdParam);
 
   // Fetch all today's games (not just unanalyzed) so Bots B/C can run on games Bot A already marked
   const gamesQuery = gameIdParam
@@ -450,7 +484,7 @@ export async function POST(req: NextRequest) {
           // --- Bot A ---
           let analysisA: GameAnalysisResult | null = null;
           let logsA: DecisionLog[] = [];
-          const skipA = runA && botAState.gameIds.has(game.id);
+          const skipA = runA && !forceReanalyze && botAState.gameIds.has(game.id);
           if (runA && !skipA) {
             console.log(`[analyze] Bot A analyzing ${game.away_team} @ ${game.home_team}`);
             const { analysis, decisions } = await analyzeGameWithClaude(game, settings, "A", todayNotes, matchedPatterns, provenPatternsA.length > 0 ? provenPatternsA : undefined, sacrificePatternsA.length > 0 ? sacrificePatternsA : undefined, h2hCtx);
@@ -463,7 +497,7 @@ export async function POST(req: NextRequest) {
           // --- Bot B ---
           let analysisB: GameAnalysisResult | null = null;
           let logsB: DecisionLog[] = [];
-          const skipB = runB && botBState.gameIds.has(game.id);
+          const skipB = runB && !forceReanalyze && botBState.gameIds.has(game.id);
           if (runB && !skipB) {
             console.log(`[analyze] Bot B analyzing ${game.away_team} @ ${game.home_team}`);
             const { analysis, decisions } = await analyzeGameWithClaude(game, botBSettings, "B", todayNotes, matchedPatterns, provenPatternsB.length > 0 ? provenPatternsB : undefined, sacrificePatternsB.length > 0 ? sacrificePatternsB : undefined, h2hCtx);
@@ -476,7 +510,7 @@ export async function POST(req: NextRequest) {
           // --- Bot C (AJ Wordplay) ---
           let analysisC: GameAnalysisResult | null = null;
           let logsC: DecisionLog[] = [];
-          const skipC = runC && botCState.gameIds.has(game.id);
+          const skipC = runC && !forceReanalyze && botCState.gameIds.has(game.id);
           if (runC && !skipC) {
             console.log(`[analyze] Bot C analyzing ${game.away_team} @ ${game.home_team}`);
             const { analysis, decisions } = await analyzeGameWithClaude(game, botCSettings, "C", todayNotes, matchedPatterns, provenPatternsC.length > 0 ? provenPatternsC : undefined, sacrificePatternsC.length > 0 ? sacrificePatternsC : undefined, h2hCtx);
@@ -489,7 +523,7 @@ export async function POST(req: NextRequest) {
           // --- Bot D (Narrative Scout) ---
           let analysisD: GameAnalysisResult | null = null;
           let logsD: DecisionLog[] = [];
-          const skipD = runD && botDState.gameIds.has(game.id);
+          const skipD = runD && !forceReanalyze && botDState.gameIds.has(game.id);
           if (runD && !skipD) {
             console.log(`[analyze] Bot D analyzing ${game.away_team} @ ${game.home_team}`);
             const { analysis, decisions } = await analyzeGameWithClaude(game, botDSettings, "D", todayNotes, matchedPatterns, provenPatternsD.length > 0 ? provenPatternsD : undefined, sacrificePatternsD.length > 0 ? sacrificePatternsD : undefined, h2hCtx);

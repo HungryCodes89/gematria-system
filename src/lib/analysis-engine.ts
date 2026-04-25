@@ -654,7 +654,7 @@ export function analyzeGame(params: {
   else if (totalAlignments >= 1) lockType = 'single'
 
   const weightedGap = Math.abs(homeScore - awayScore)
-  const skippedByTightWeightedGap = homeScore > 0 && awayScore > 0 && weightedGap < 25
+  const skippedByTightWeightedGap = homeScore > 0 && awayScore > 0 && weightedGap < 15
   if (skippedByTightWeightedGap) {
     lockType = 'skip'
   }
