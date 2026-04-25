@@ -10,6 +10,8 @@ import type {
   GematriaSettings,
   TradeDecision,
   LockType,
+  BotDecision,
+  ReconciledDecision,
 } from "@/lib/types";
 import type { GameAnalysisResult, MatchedPattern, ProvenPattern, SacrificePattern } from "@/lib/claude-agent";
 
@@ -20,12 +22,10 @@ const AUTO_BET_MAP: Record<LockType, keyof GematriaSettings | null> = {
   triple_lock:    "auto_bet_triple_locks",
   double_lock:    "auto_bet_double_locks",
   single_lock:    "auto_bet_single_locks",
-  sacrifice_lock: "auto_bet_triple_locks", // same threshold as triple lock
+  sacrifice_lock: "auto_bet_triple_locks",
   no_lock:        null,
 };
 
-// Bots B/C/D use their own confidence to determine lock type — they are not
-// gated by the gematria engine so each bot can bet on different games.
 function confidenceToLockType(confidence: number): LockType {
   if (confidence >= 75) return "triple_lock";
   if (confidence >= 60) return "double_lock";
@@ -44,7 +44,6 @@ function extractOpeningLine(
 ): number | null {
   const odds = game.polymarket_odds;
   if (!odds) return null;
-  // Prefer Pinnacle (sharpest book) for CLV benchmark; fall back to polymarket
   if (betType === "over_under") {
     return odds.pinnacleOverUnderLine ?? odds.overUnderLine ?? null;
   }
@@ -67,7 +66,71 @@ interface DecisionLog {
   dbError?: string;
 }
 
-async function placeBots(
+// ── Bot Reconciliation Helpers ─────────────────────────────────────────────
+
+function groupBy<T>(arr: T[], key: (item: T) => string): Record<string, T[]> {
+  return arr.reduce((acc, item) => {
+    const k = key(item);
+    (acc[k] = acc[k] ?? []).push(item);
+    return acc;
+  }, {} as Record<string, T[]>);
+}
+
+function lockTierToUnits(lockType: string): number {
+  if (lockType === "triple_lock" || lockType === "sacrifice_lock") return 3;
+  if (lockType === "double_lock") return 2;
+  if (lockType === "single_lock") return 1;
+  return 0;
+}
+
+function logSkip(gameId: string, reason: string, decisions: BotDecision[]): void {
+  const bots = decisions.map(d => `Bot${d.bot}→${d.picked_side ?? "null"}`).join(", ");
+  console.log(`[reconcile] SKIP game=${gameId} reason=${reason} decisions=[${bots}]`);
+}
+
+function reconcileBotDecisions(decisions: BotDecision[], game: Game): ReconciledDecision | null {
+  const bySide = groupBy(decisions, d => d.picked_side ?? "null");
+  const sides = Object.keys(bySide);
+  if (sides.length > 1) {
+    logSkip(game.id, "bot_disagreement", decisions);
+    return null;
+  }
+  const winningSide = sides[0]!;
+  const botPicks = bySide[winningSide]!;
+  const topBot = botPicks.reduce((a, b) => a.units > b.units ? a : b);
+  return {
+    ...topBot,
+    convergence_count: botPicks.length,
+    convergent_bots: botPicks.map(b => b.bot),
+    sizing_note: null,
+  };
+}
+
+function sizeWithPriceModifier(decision: ReconciledDecision): ReconciledDecision {
+  const baseUnits = lockTierToUnits(decision.lock_type);
+  let priceModifier = 1.0;
+  if (decision.bet_type === "moneyline") {
+    if (decision.odds >= 300)        priceModifier = 0.25;
+    else if (decision.odds >= 200)   priceModifier = 0.5;
+    else if (decision.odds >= 150)   priceModifier = 0.75;
+  }
+  return {
+    ...decision,
+    units: baseUnits * priceModifier,
+    sizing_note: priceModifier < 1.0
+      ? `base ${baseUnits}u × ${priceModifier} (price modifier @ ${decision.odds}) = ${baseUnits * priceModifier}u`
+      : null,
+  };
+}
+
+// ── Gather (gate-check without placing) ───────────────────────────────────
+
+interface GatheredResult {
+  logs: DecisionLog[];
+  betDecisions: BotDecision[];
+}
+
+async function gatherEligibleBets(
   supabase: ReturnType<typeof getSupabaseAdmin>,
   game: Game,
   decisions: TradeDecision[],
@@ -75,10 +138,10 @@ async function placeBots(
   bot: "A" | "B" | "C" | "D",
   settings: GematriaSettings,
   state: { balance: number; dailyUnits: number; betsPlaced: number; gameIds: Set<string> }
-): Promise<DecisionLog[]> {
+): Promise<GatheredResult> {
   const logs: DecisionLog[] = [];
+  const betDecisions: BotDecision[] = [];
 
-  // Always surface Claude's reasoning even when a bet is gated (lock type, settings, confidence, limits).
   const saveAnalysisRecord = (decision: TradeDecision, lockType: string) =>
     supabase.from("paper_trades").upsert({
       game_id: game.id,
@@ -114,63 +177,39 @@ async function placeBots(
 
     if (decision.action !== "bet") {
       const reason = "Claude returned action=skip";
-      console.log(`[placeBots] Bot ${bot} [${idx}] SKIP — ${reason} | lean=${decision.pick} conf=${decision.confidence}`);
-      // Store lean/pass analysis so UI always shows reasoning even when no bet is placed.
-      // Uses bet_type='analysis' to avoid conflicting with real moneyline/over_under records.
-      await supabase.from("paper_trades").upsert({
-        game_id: game.id,
-        bot,
-        bet_type: "analysis",
-        pick: decision.pick || "Pass",
-        picked_side: decision.pickedSide ?? null,
-        odds: null,
-        implied_probability: null,
-        model_probability: null,
-        ev: null,
-        units: 0,
-        stake: 0,
-        potential_profit: 0,
-        result: "pass",
-        profit_loss: 0,
-        confidence: decision.confidence,
-        lock_type: analysis.lockType,
-        reasoning: decision.reasoning,
-        placed_at: new Date().toISOString(),
-      }, { onConflict: "game_id,bet_type,bot" });
+      console.log(`[gather] Bot ${bot} [${idx}] SKIP — ${reason} | lean=${decision.pick} conf=${decision.confidence}`);
+      await saveAnalysisRecord(decision, analysis.lockType);
       logs.push({ ...base, placed: false, skipReason: reason });
       continue;
     }
 
-    // Sacrifice lock overrides all bots — when sacrifice is detected, all bots
-    // treat this as a sacrifice_lock regardless of bot identity or confidence.
-    // Otherwise: Bot A uses the engine's lock type; B/C/D derive from confidence.
-    const effectiveLockType =
+    const effectiveLockType: LockType =
       analysis.lockType === "sacrifice_lock"
         ? "sacrifice_lock"
         : bot === "A"
-          ? analysis.lockType
+          ? analysis.lockType as LockType
           : confidenceToLockType(decision.confidence);
 
-    console.log(`[placeBots] Bot ${bot} [${idx}] action=bet pick="${decision.pick}" conf=${decision.confidence}% effectiveLock=${effectiveLockType}`);
+    console.log(`[gather] Bot ${bot} [${idx}] action=bet pick="${decision.pick}" conf=${decision.confidence}% effectiveLock=${effectiveLockType}`);
 
     const autoBetKey = AUTO_BET_MAP[effectiveLockType];
     if (!autoBetKey) {
       const reason = `${bot === "A" ? "Engine" : "Claude"}: ${effectiveLockType} — no auto-bet for no_lock`;
-      console.log(`[placeBots] Bot ${bot} [${idx}] SKIP — ${reason}`);
+      console.log(`[gather] Bot ${bot} [${idx}] SKIP — ${reason}`);
       await saveAnalysisRecord(decision, effectiveLockType);
       logs.push({ ...base, placed: false, skipReason: reason });
       continue;
     }
     if (!settings[autoBetKey]) {
       const reason = `Auto-bet disabled for ${effectiveLockType} (settings.${autoBetKey}=false)`;
-      console.log(`[placeBots] Bot ${bot} [${idx}] SKIP — ${reason}`);
+      console.log(`[gather] Bot ${bot} [${idx}] SKIP — ${reason}`);
       await saveAnalysisRecord(decision, effectiveLockType);
       logs.push({ ...base, placed: false, skipReason: reason });
       continue;
     }
     if (decision.confidence < settings.min_confidence) {
       const reason = `Claude confidence ${decision.confidence}% < min_confidence ${settings.min_confidence}%`;
-      console.log(`[placeBots] Bot ${bot} [${idx}] SKIP — ${reason}`);
+      console.log(`[gather] Bot ${bot} [${idx}] SKIP — ${reason}`);
       await saveAnalysisRecord(decision, effectiveLockType);
       logs.push({ ...base, placed: false, skipReason: reason });
       continue;
@@ -178,68 +217,134 @@ async function placeBots(
     if (!canPlaceBet(state.balance, state.dailyUnits, decision.units, settings)) {
       const stake = calculateStake(decision.units, settings.unit_size);
       const reason = `Limit hit: balance=$${state.balance} stake=$${stake} dailyUnits=${state.dailyUnits}/${settings.max_daily_units}`;
-      console.log(`[placeBots] Bot ${bot} [${idx}] SKIP — ${reason}`);
+      console.log(`[gather] Bot ${bot} [${idx}] SKIP — ${reason}`);
       await saveAnalysisRecord(decision, effectiveLockType);
       logs.push({ ...base, placed: false, skipReason: reason });
       continue;
     }
 
-    const stake = calculateStake(decision.units, settings.unit_size);
-    const potentialProfit =
-      decision.odds > 0
-        ? stake * (decision.odds / 100)
-        : stake * (100 / Math.abs(decision.odds));
-
-    const { error: insertErr } = await supabase
-      .from("paper_trades")
-      .insert({
-        game_id: game.id,
-        bot,
-        bet_type: decision.betType,
-        pick: decision.pick,
-        picked_side: decision.pickedSide,
-        odds: decision.odds,
-        implied_probability: decision.impliedProbability,
-        model_probability: decision.modelProbability,
-        ev: decision.ev,
-        units: decision.units,
-        stake,
-        potential_profit: potentialProfit,
-        result: "pending",
-        profit_loss: 0,
-        confidence: decision.confidence,
-        lock_type: effectiveLockType,
-        reasoning: decision.reasoning,
-        opening_line: extractOpeningLine(game, decision.betType, decision.pickedSide),
-        strategy_version: "v1",
-        placed_at: new Date().toISOString(),
-      })
-      .select("id")
-      .single();
-
-    if (!insertErr) {
-      state.balance -= stake;
-      state.dailyUnits += decision.units;
-      state.betsPlaced++;
-      state.gameIds.add(game.id);
-      console.log(`[placeBots] Bot ${bot} [${idx}] PLACED — ${decision.pick} ${decision.units}u @ ${decision.odds} lock=${effectiveLockType}`);
-      logs.push({ ...base, placed: true });
-    } else {
-      // Constraint violation (e.g. bot CHECK only allows A/B) shows up here
-      console.error(`[placeBots] Bot ${bot} DB INSERT FAILED for game ${game.id}: ${insertErr.message}`);
-      console.error(`[placeBots] If error mentions 'bot_check' constraint run: ALTER TABLE paper_trades DROP CONSTRAINT paper_trades_bot_check; ALTER TABLE paper_trades ADD CONSTRAINT paper_trades_bot_check CHECK (bot IN ('A','B','C','D'));`);
-      logs.push({ ...base, placed: false, skipReason: "DB insert failed", dbError: insertErr.message });
-    }
+    // Passed all gates — defer to reconciliation step
+    betDecisions.push({
+      bot,
+      lock_type: effectiveLockType,
+      bet_type: decision.betType,
+      pick: decision.pick,
+      picked_side: decision.pickedSide ?? null,
+      odds: decision.odds,
+      implied_probability: decision.impliedProbability,
+      model_probability: decision.modelProbability,
+      ev: decision.ev,
+      units: decision.units,
+      confidence: decision.confidence,
+      reasoning: decision.reasoning,
+    });
+    logs.push({ ...base, placed: false, skipReason: "pending_reconciliation" });
   }
 
-  return logs;
+  return { logs, betDecisions };
+}
+
+// ── Save analysis records for reconciliation-rejected eligibles ────────────
+
+async function saveAnalysisRecordsForRejected(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  game: Game,
+  decisions: BotDecision[]
+): Promise<void> {
+  for (const d of decisions) {
+    await supabase.from("paper_trades").upsert({
+      game_id: game.id,
+      bot: d.bot,
+      bet_type: "analysis",
+      pick: d.pick,
+      picked_side: d.picked_side,
+      odds: null,
+      implied_probability: null,
+      model_probability: null,
+      ev: null,
+      units: 0,
+      stake: 0,
+      potential_profit: 0,
+      result: "pass",
+      profit_loss: 0,
+      confidence: d.confidence,
+      lock_type: d.lock_type,
+      reasoning: d.reasoning,
+      placed_at: new Date().toISOString(),
+    }, { onConflict: "game_id,bet_type,bot" });
+  }
+}
+
+// ── Place the single reconciled bet ───────────────────────────────────────
+
+type BotStates = Record<"A" | "B" | "C" | "D", { balance: number; dailyUnits: number; betsPlaced: number; gameIds: Set<string> }>;
+
+async function placeReconciledBet(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  game: Game,
+  decision: ReconciledDecision,
+  settings: GematriaSettings,
+  botStates: BotStates
+): Promise<boolean> {
+  const state = botStates[decision.bot];
+  const stake = calculateStake(decision.units, settings.unit_size);
+  const potentialProfit =
+    decision.odds > 0
+      ? stake * (decision.odds / 100)
+      : stake * (100 / Math.abs(decision.odds));
+
+  const convergenceNote =
+    decision.convergence_count > 1
+      ? `\n\n[BOT CONSENSUS: ${decision.convergence_count} bots (${decision.convergent_bots.join(",")})${decision.sizing_note ? ` | SIZING: ${decision.sizing_note}` : ""}]`
+      : decision.sizing_note
+        ? `\n\n[SIZING: ${decision.sizing_note}]`
+        : "";
+
+  const { error: insertErr } = await supabase
+    .from("paper_trades")
+    .insert({
+      game_id: game.id,
+      bot: decision.bot,
+      bet_type: decision.bet_type,
+      pick: decision.pick,
+      picked_side: decision.picked_side,
+      odds: decision.odds,
+      implied_probability: decision.implied_probability,
+      model_probability: decision.model_probability,
+      ev: decision.ev,
+      units: decision.units,
+      stake,
+      potential_profit: potentialProfit,
+      result: "pending",
+      profit_loss: 0,
+      confidence: decision.confidence,
+      lock_type: decision.lock_type,
+      reasoning: `${decision.reasoning}${convergenceNote}`,
+      opening_line: extractOpeningLine(game, decision.bet_type, decision.picked_side),
+      strategy_version: "v1",
+      placed_at: new Date().toISOString(),
+    })
+    .select("id")
+    .single();
+
+  if (!insertErr) {
+    state.balance -= stake;
+    state.dailyUnits += decision.units;
+    state.betsPlaced++;
+    state.gameIds.add(game.id);
+    console.log(`[reconcile] PLACED — ${decision.pick} ${decision.units}u @ ${decision.odds} lock=${decision.lock_type} bots=[${decision.convergent_bots.join(",")}] count=${decision.convergence_count}${decision.sizing_note ? ` sizing=${decision.sizing_note}` : ""}`);
+    return true;
+  } else {
+    console.error(`[reconcile] DB INSERT FAILED for game ${game.id}: ${insertErr.message}`);
+    console.error(`[reconcile] If error mentions 'bot_check' constraint run: ALTER TABLE paper_trades DROP CONSTRAINT paper_trades_bot_check; ALTER TABLE paper_trades ADD CONSTRAINT paper_trades_bot_check CHECK (bot IN ('A','B','C','D'));`);
+    return false;
+  }
 }
 
 export async function POST(req: NextRequest) {
   const supabase = getSupabaseAdmin();
   const today = getTodayET();
 
-  // Parse request body — bot selector + optional single-game re-analyze
   let botParam: "all" | "A" | "B" | "C" | "D" = "all";
   let gameIdParam: string | null = null;
   try {
@@ -259,7 +364,6 @@ export async function POST(req: NextRequest) {
   }
   const settings = settingsRow as GematriaSettings;
 
-  // Build per-bot effective settings (fall back to Bot A values if unset)
   const botBSettings: GematriaSettings = {
     ...settings,
     system_prompt: settings.bot_b_system_prompt || settings.system_prompt,
@@ -284,8 +388,6 @@ export async function POST(req: NextRequest) {
   const runC = (botParam === "all" || botParam === "C") && Boolean(settings.bot_c_system_prompt);
   const runD = (botParam === "all" || botParam === "D") && Boolean(settings.bot_d_system_prompt);
 
-  // Single-game re-analyze: reset analyzed flag and wipe existing analysis records
-  // so the dedup check doesn't skip the game on re-run.
   if (gameIdParam) {
     await supabase.from("games").update({ analyzed: false }).eq("id", gameIdParam);
     await supabase.from("paper_trades")
@@ -296,7 +398,6 @@ export async function POST(req: NextRequest) {
 
   const forceReanalyze = Boolean(gameIdParam);
 
-  // Fetch all today's games (not just unanalyzed) so Bots B/C can run on games Bot A already marked
   const gamesQuery = gameIdParam
     ? supabase.from("games").select("*").eq("id", gameIdParam)
     : supabase.from("games").select("*").eq("game_date", today);
@@ -307,7 +408,6 @@ export async function POST(req: NextRequest) {
   console.log(`[analyze] runD gate: botParam=${botParam} bot_d_prompt_set=${Boolean(settings.bot_d_system_prompt)} (${(settings.bot_d_system_prompt ?? "").length} chars)`);
   console.log(`[analyze] settings: min_confidence=${settings.min_confidence} triple=${settings.auto_bet_triple_locks} double=${settings.auto_bet_double_locks} single=${settings.auto_bet_single_locks}`);
 
-  // Fetch today's decode notes once and inject into all bot prompts
   const { data: notesRow } = await supabase
     .from("decode_notes")
     .select("content")
@@ -315,7 +415,6 @@ export async function POST(req: NextRequest) {
     .single();
   const todayNotes = notesRow?.content ?? "";
 
-  // Fetch validated patterns and match against tonight's date numerology
   const [y, m, d] = today.split("-").map(Number);
   const todayDateObj = new Date(y!, m! - 1, d!);
   const todayNumerology = calculateDateNumerology(todayDateObj);
@@ -331,7 +430,6 @@ export async function POST(req: NextRequest) {
     return dateNums.some((n) => todayValueSet.has(n));
   });
 
-  // Fetch top proven patterns per bot (min 5 fires, top 5 by weight_score)
   const { data: allWeights } = await supabase
     .from("signal_weights")
     .select("bot, signal_name, times_fired, wins, losses, win_rate, avg_clv, weight_score")
@@ -358,7 +456,6 @@ export async function POST(req: NextRequest) {
   const provenPatternsC = getTopPatterns("C");
   const provenPatternsD = getTopPatterns("D");
 
-  // Fetch sacrifice patterns — used to detect when Triple Lock teams are scripted to lose
   const { data: allSacrificeData } = await supabase
     .from("sacrifice_patterns")
     .select("bot, signal_name, triple_lock_fires, sacrifice_outcomes, lock_outcomes, sacrifice_rate")
@@ -390,7 +487,6 @@ export async function POST(req: NextRequest) {
 
   const balance = ledgerRow?.balance ?? settings.starting_bankroll;
 
-  // Query each bot's daily trades — units for limit tracking, game_id for dedup
   const [botARes, botBRes, botCRes, botDRes] = await Promise.all([
     supabase
       .from("paper_trades")
@@ -447,11 +543,12 @@ export async function POST(req: NextRequest) {
   console.log(`[analyze] Bot C today: ${botCState.dailyUnits}u, ${botCState.gameIds.size} games`);
   console.log(`[analyze] Bot D today: ${botDState.dailyUnits}u, ${botDState.gameIds.size} games`);
 
+  const botStates: BotStates = { A: botAState, B: botBState, C: botCState, D: botDState };
+
   const total = unanalyzed.length;
   let analyzed = 0;
   const errors: string[] = [];
 
-  // Pre-fetch H2H context for all games before streaming begins (fast Supabase queries)
   const h2hMap = new Map<string, string>();
   await Promise.all(
     unanalyzed.map(async (game) => {
@@ -484,12 +581,15 @@ export async function POST(req: NextRequest) {
           // --- Bot A ---
           let analysisA: GameAnalysisResult | null = null;
           let logsA: DecisionLog[] = [];
+          let betDecisionsA: BotDecision[] = [];
           const skipA = runA && !forceReanalyze && botAState.gameIds.has(game.id);
           if (runA && !skipA) {
             console.log(`[analyze] Bot A analyzing ${game.away_team} @ ${game.home_team}`);
             const { analysis, decisions } = await analyzeGameWithClaude(game, settings, "A", todayNotes, matchedPatterns, provenPatternsA.length > 0 ? provenPatternsA : undefined, sacrificePatternsA.length > 0 ? sacrificePatternsA : undefined, h2hCtx);
             analysisA = analysis;
-            logsA = await placeBots(supabase, game, decisions, analysis, "A", settings, botAState);
+            const gatheredA = await gatherEligibleBets(supabase, game, decisions, analysis, "A", settings, botAState);
+            logsA = gatheredA.logs;
+            betDecisionsA = gatheredA.betDecisions;
           } else if (skipA) {
             console.log(`[analyze] Bot A skip — already bet game ${game.id}`);
           }
@@ -497,12 +597,15 @@ export async function POST(req: NextRequest) {
           // --- Bot B ---
           let analysisB: GameAnalysisResult | null = null;
           let logsB: DecisionLog[] = [];
+          let betDecisionsB: BotDecision[] = [];
           const skipB = runB && !forceReanalyze && botBState.gameIds.has(game.id);
           if (runB && !skipB) {
             console.log(`[analyze] Bot B analyzing ${game.away_team} @ ${game.home_team}`);
             const { analysis, decisions } = await analyzeGameWithClaude(game, botBSettings, "B", todayNotes, matchedPatterns, provenPatternsB.length > 0 ? provenPatternsB : undefined, sacrificePatternsB.length > 0 ? sacrificePatternsB : undefined, h2hCtx);
             analysisB = analysis;
-            logsB = await placeBots(supabase, game, decisions, analysis, "B", settings, botBState);
+            const gatheredB = await gatherEligibleBets(supabase, game, decisions, analysis, "B", settings, botBState);
+            logsB = gatheredB.logs;
+            betDecisionsB = gatheredB.betDecisions;
           } else if (skipB) {
             console.log(`[analyze] Bot B skip — already bet game ${game.id}`);
           }
@@ -510,12 +613,15 @@ export async function POST(req: NextRequest) {
           // --- Bot C (AJ Wordplay) ---
           let analysisC: GameAnalysisResult | null = null;
           let logsC: DecisionLog[] = [];
+          let betDecisionsC: BotDecision[] = [];
           const skipC = runC && !forceReanalyze && botCState.gameIds.has(game.id);
           if (runC && !skipC) {
             console.log(`[analyze] Bot C analyzing ${game.away_team} @ ${game.home_team}`);
             const { analysis, decisions } = await analyzeGameWithClaude(game, botCSettings, "C", todayNotes, matchedPatterns, provenPatternsC.length > 0 ? provenPatternsC : undefined, sacrificePatternsC.length > 0 ? sacrificePatternsC : undefined, h2hCtx);
             analysisC = analysis;
-            logsC = await placeBots(supabase, game, decisions, analysis, "C", settings, botCState);
+            const gatheredC = await gatherEligibleBets(supabase, game, decisions, analysis, "C", settings, botCState);
+            logsC = gatheredC.logs;
+            betDecisionsC = gatheredC.betDecisions;
           } else if (skipC) {
             console.log(`[analyze] Bot C skip — already bet game ${game.id}`);
           }
@@ -523,6 +629,7 @@ export async function POST(req: NextRequest) {
           // --- Bot D (Narrative Scout) ---
           let analysisD: GameAnalysisResult | null = null;
           let logsD: DecisionLog[] = [];
+          let betDecisionsD: BotDecision[] = [];
           const skipD = runD && !forceReanalyze && botDState.gameIds.has(game.id);
           if (runD && !skipD) {
             console.log(`[analyze] Bot D analyzing ${game.away_team} @ ${game.home_team}`);
@@ -532,17 +639,41 @@ export async function POST(req: NextRequest) {
               console.log(`[bot-D] decision[${i}] action=${d.action} pick="${d.pick}" conf=${d.confidence}% odds=${d.odds} units=${d.units} effectiveLock=${confidenceToLockType(d.confidence)}`);
             });
             analysisD = analysis;
-            logsD = await placeBots(supabase, game, decisions, analysis, "D", settings, botDState);
+            const gatheredD = await gatherEligibleBets(supabase, game, decisions, analysis, "D", settings, botDState);
+            logsD = gatheredD.logs;
+            betDecisionsD = gatheredD.betDecisions;
           } else if (skipD) {
             console.log(`[analyze] Bot D skip — already bet game ${game.id}`);
           } else if (!runD) {
             console.log(`[analyze] Bot D disabled — botParam=${botParam} bot_d_prompt_set=${Boolean(settings.bot_d_system_prompt)}`);
           }
 
+          // --- Reconcile & Place ---
+          const allBetDecisions = [...betDecisionsA, ...betDecisionsB, ...betDecisionsC, ...betDecisionsD];
+          if (allBetDecisions.length > 0) {
+            const reconciled = reconcileBotDecisions(allBetDecisions, game);
+            if (reconciled === null) {
+              // Bots disagree — save analysis records so all bots are deduped on re-run
+              await saveAnalysisRecordsForRejected(supabase, game, allBetDecisions);
+            } else {
+              const sized = sizeWithPriceModifier(reconciled);
+              const placed = await placeReconciledBet(supabase, game, sized, settings, botStates);
+              if (placed) {
+                // Save analysis records for non-winning bots so they dedup on re-run
+                const nonWinners = allBetDecisions.filter(d => d.bot !== sized.bot);
+                if (nonWinners.length > 0) {
+                  await saveAnalysisRecordsForRejected(supabase, game, nonWinners);
+                }
+              } else {
+                // Placement failed — save analysis records for all
+                await saveAnalysisRecordsForRejected(supabase, game, allBetDecisions);
+              }
+            }
+          }
+
           const primaryAnalysis = analysisA ?? analysisB ?? analysisC ?? analysisD;
           const anyBotRan = analysisA || analysisB || analysisC || analysisD;
 
-          // Only update game metadata when at least one bot ran (avoid overwriting with nulls)
           if (anyBotRan) {
             await supabase
               .from("games")
@@ -591,8 +722,6 @@ export async function POST(req: NextRequest) {
       }
 
       const totalBets = botAState.betsPlaced + botBState.betsPlaced + botCState.betsPlaced + botDState.betsPlaced;
-      // Only include balances from bots that actually ran — disabled bots retain the
-      // full starting balance and would otherwise corrupt the Math.min result.
       const activeBalances = [
         runA ? botAState.balance : null,
         runB ? botBState.balance : null,

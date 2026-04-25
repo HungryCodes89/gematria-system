@@ -222,3 +222,26 @@ export interface DateNumerology {
   shortYear: number;
   monthDay: number;
 }
+
+// ── Bot Reconciliation ──
+
+export interface BotDecision {
+  bot: "A" | "B" | "C" | "D";
+  lock_type: LockType;
+  bet_type: "moneyline" | "over_under";
+  pick: string;
+  picked_side: "home" | "away" | null;
+  odds: number;
+  implied_probability: number;
+  model_probability: number;
+  ev: number;
+  units: number;
+  confidence: number;
+  reasoning: string;
+}
+
+export interface ReconciledDecision extends BotDecision {
+  convergence_count: number;
+  convergent_bots: ("A" | "B" | "C" | "D")[];
+  sizing_note: string | null;
+}
