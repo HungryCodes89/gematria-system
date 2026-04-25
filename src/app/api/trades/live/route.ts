@@ -10,7 +10,7 @@ export async function GET() {
     sb
       .from("paper_trades")
       .select("*, game:games(*)")
-      .eq("result", "pending")
+      .in("result", ["pending", "pass"])
       .order("placed_at", { ascending: false }),
     sb
       .from("bankroll_ledger")
