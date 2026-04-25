@@ -217,6 +217,70 @@ async function runSelfHeal(
   return updates;
 }
 
+// ── Bot D narrative reflection prompt ────────────────────────────────────────
+
+function buildBotDReflectionPrompt(breakdown: GameBreakdown[], date: string): string {
+  const botDGames = breakdown.filter(g => g.entries.some(e => e.bot === "D"));
+
+  const lines = [
+    `BOT D NARRATIVE SCOUT DEBRIEF — ${date}`,
+    "",
+    "=== TODAY'S SLATE ===",
+  ];
+
+  for (const game of breakdown) {
+    const score = game.homeScore != null && game.awayScore != null
+      ? `${game.awayScore}–${game.homeScore}` : "no final score";
+    lines.push(`${game.awayTeam} @ ${game.homeTeam} [${game.league}] — ${score}`);
+
+    const dEntries = game.entries.filter(e => e.bot === "D");
+    if (dEntries.length) {
+      for (const e of dEntries) {
+        const icon = e.result === "win" || e.result === "lean_hit" ? "✓"
+          : e.result === "loss" || e.result === "lean_miss" ? "✗" : "–";
+        const label = e.betType === "analysis" ? "LEAN" : "BET";
+        lines.push(`  MY CALL: ${icon} ${label} ${e.pick} (conf=${e.confidence ?? "?"}%)`);
+        if (e.reasoning) {
+          lines.push(`  MY READ: "${e.reasoning.slice(0, 280).replace(/\n/g, " ")}"`);
+        }
+      }
+    } else {
+      lines.push("  (no pick)");
+    }
+  }
+
+  if (!botDGames.length) {
+    lines.push("\n(Bot D had no picks today — reflect on the full slate retrospectively)");
+  }
+
+  lines.push(`
+=== YOUR TASK ===
+You are Bot D — the HUNGRY System's Narrative Scout. You read sports through the lens of media narratives, scripted theater, revenge storylines, coronation games, underdog arcs, and public attention cycles.
+
+Today is ${date}. Review the slate and your picks above. Write your personal debrief in first person.
+
+Respond with EXACTLY these section headers (## prefix):
+
+## NARRATIVES THAT PLAYED OUT
+Which storylines were scripted correctly today. Name the team, the arc (revenge game, coronation, underdog moment, media cycle), and what made it legible in advance.
+
+## WHERE THE SCRIPT FLIPPED
+Games where the narrative pointed one way but the outcome went the other. Was there a counter-narrative you underweighted? A quiet story you missed?
+
+## GAMES I PASSED — IN RETROSPECT
+Any games you skipped that had a clear narrative angle. What was the signal and why did you sit out.
+
+## TOMORROW'S NARRATIVE WATCH
+Which teams on tonight's slate are on a building emotional arc. Which game tomorrow looks narratively primed for a specific outcome — and what story is being written.
+
+## ONE ADJUSTMENT
+One change to your read methodology or filter criteria for tomorrow.
+
+Total under 450 words. First person. Direct. Analytical.`);
+
+  return lines.join("\n");
+}
+
 // ── Claude debrief prompt ────────────────────────────────────────────────────
 
 function buildDebriefPrompt(breakdown: GameBreakdown[], date: string): string {
@@ -284,7 +348,7 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const date = url.searchParams.get("date") ?? yesterdayET();
 
-  const [breakdown, { data: stored }] = await Promise.all([
+  const [breakdown, { data: stored }, { data: storedBotD }] = await Promise.all([
     computeBreakdown(supabase, date),
     supabase
       .from("daily_briefings")
@@ -292,11 +356,18 @@ export async function GET(req: NextRequest) {
       .eq("briefing_date", date)
       .eq("bot", "debrief")
       .single(),
+    supabase
+      .from("daily_briefings")
+      .select("content,created_at")
+      .eq("briefing_date", date)
+      .eq("bot", "D")
+      .single(),
   ]);
 
   return Response.json({
     date,
     narrative: stored?.content ?? null,
+    botDNarrative: storedBotD?.content ?? null,
     generatedAt: stored?.created_at ?? null,
     selfHealApplied: (stored?.bets_count ?? 0) > 0,
     stats: computeStats(breakdown),
@@ -330,30 +401,59 @@ export async function POST(req: NextRequest) {
     signalUpdates = await runSelfHeal(supabase, date);
   }
 
-  // Generate Claude narrative
+  // Fetch Bot D system prompt for its debrief persona
+  const { data: settingsRow } = await supabase
+    .from("gematria_settings")
+    .select("bot_d_system_prompt")
+    .eq("id", 1)
+    .single();
+  const botDSystemPrompt: string = (settingsRow as { bot_d_system_prompt?: string } | null)?.bot_d_system_prompt
+    || "You are Bot D, a sports narrative analyst who reads outcomes through the lens of media storylines, public arcs, and scripted theater.";
+
+  // Generate main debrief + Bot D reflection in parallel
   const client = new Anthropic();
-  const msg = await client.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 1200,
-    messages: [{ role: "user", content: buildDebriefPrompt(breakdown, date) }],
-  });
-  const narrative = msg.content.find(b => b.type === "text")?.text ?? "";
+  const [mainMsg, botDMsg] = await Promise.all([
+    client.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 1200,
+      messages: [{ role: "user", content: buildDebriefPrompt(breakdown, date) }],
+    }),
+    client.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 1000,
+      system: botDSystemPrompt,
+      messages: [{ role: "user", content: buildBotDReflectionPrompt(breakdown, date) }],
+    }),
+  ]);
+
+  const narrative    = mainMsg.content.find(b => b.type === "text")?.text ?? "";
+  const botDNarrative = botDMsg.content.find(b => b.type === "text")?.text ?? "";
 
   const stats = computeStats(breakdown);
   const real = breakdown.flatMap(g => g.entries.filter(e => e.betType !== "analysis"));
 
-  // Store — bets_count > 0 signals that self-heal has been applied for this date
-  await supabase.from("daily_briefings").upsert({
-    briefing_date: date,
-    bot: "debrief",
-    content: narrative,
-    games_count: breakdown.length,
-    bets_count: isFirstRun ? Math.max(1, real.length) : (existing?.bets_count ?? 1),
-  }, { onConflict: "briefing_date,bot" });
+  // Store both — bets_count > 0 signals that self-heal has been applied for this date
+  await Promise.all([
+    supabase.from("daily_briefings").upsert({
+      briefing_date: date,
+      bot: "debrief",
+      content: narrative,
+      games_count: breakdown.length,
+      bets_count: isFirstRun ? Math.max(1, real.length) : (existing?.bets_count ?? 1),
+    }, { onConflict: "briefing_date,bot" }),
+    supabase.from("daily_briefings").upsert({
+      briefing_date: date,
+      bot: "D",
+      content: botDNarrative,
+      games_count: breakdown.length,
+      bets_count: 0,
+    }, { onConflict: "briefing_date,bot" }),
+  ]);
 
   return Response.json({
     date,
     narrative,
+    botDNarrative,
     stats,
     signalUpdates,
     selfHealApplied: isFirstRun,

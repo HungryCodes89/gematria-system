@@ -241,9 +241,12 @@ interface DebriefModalProps {
   onClose: () => void;
 }
 
+type DebriefTab = "oracle" | "botd";
+
 interface DebriefData {
   date: string;
   narrative: string | null;
+  botDNarrative: string | null;
   generatedAt: string | null;
   selfHealApplied: boolean;
   stats: DebriefStats;
@@ -255,6 +258,7 @@ export default function DebriefModal({ onClose }: DebriefModalProps) {
   const today = getTodayET();
   const [date, setDate] = useState(getYesterdayET());
   const [data, setData] = useState<DebriefData | null>(null);
+  const [tab, setTab] = useState<DebriefTab>("oracle");
   const [fetching, setFetching] = useState(false);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
@@ -301,9 +305,11 @@ export default function DebriefModal({ onClose }: DebriefModalProps) {
     }
   }
 
-  const canGoForward = date < today;
-  const hasNarrative = Boolean(data?.narrative);
-  const hasGames     = (data?.games?.length ?? 0) > 0;
+  const canGoForward  = date < today;
+  const hasNarrative  = Boolean(data?.narrative);
+  const hasBotD       = Boolean(data?.botDNarrative);
+  const hasGames      = (data?.games?.length ?? 0) > 0;
+  const hasAnyContent = hasNarrative || hasBotD || hasGames;
 
   return (
     <div
@@ -403,6 +409,43 @@ export default function DebriefModal({ onClose }: DebriefModalProps) {
         {/* ── Stats bar ── */}
         {data?.stats && <StatsBar stats={data.stats} />}
 
+        {/* ── Tabs ── */}
+        {hasAnyContent && !running && (
+          <div style={{ display: "flex", gap: 4, marginBottom: 12, flexShrink: 0 }}>
+            {([
+              { id: "oracle" as DebriefTab, label: "ORACLE", dot: hasNarrative, dotColor: "#D4A574" },
+              { id: "botd"   as DebriefTab, label: "BOT D",  dot: hasBotD,      dotColor: "#C9A961" },
+            ]).map(({ id, label, dot, dotColor }) => {
+              const active = tab === id;
+              return (
+                <button
+                  key={id}
+                  onClick={() => setTab(id)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 5,
+                    fontFamily: "var(--font-display)",
+                    fontSize: 8,
+                    letterSpacing: "0.16em",
+                    padding: "4px 10px",
+                    borderRadius: 5,
+                    border: active ? `1px solid ${dotColor}55` : "1px solid #1E2532",
+                    background: active ? `${dotColor}14` : "transparent",
+                    color: active ? dotColor : "#4A4D54",
+                    cursor: "pointer",
+                  }}
+                >
+                  {dot && (
+                    <span style={{ width: 5, height: 5, borderRadius: "50%", background: dotColor, flexShrink: 0 }} />
+                  )}
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {/* ── Scrollable content ── */}
         <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
           {error && (
@@ -415,7 +458,7 @@ export default function DebriefModal({ onClose }: DebriefModalProps) {
             </div>
           )}
 
-          {!fetching && !running && !hasNarrative && !hasGames && (
+          {!fetching && !running && !hasAnyContent && (
             <div style={{ textAlign: "center", padding: "60px 0" }}>
               <p style={{ fontFamily: "var(--font-display)", fontSize: 10, letterSpacing: "0.16em", color: "#4A4D54" }}>
                 NO DATA FOR {date}
@@ -428,43 +471,78 @@ export default function DebriefModal({ onClose }: DebriefModalProps) {
 
           {running && (
             <div style={{ textAlign: "center", padding: "60px 0", fontFamily: "var(--font-mono)", fontSize: 11, color: "#D4A574" }}>
-              Generating debrief + updating signal weights…
+              Generating debrief + Bot D reflection + updating signal weights…
             </div>
           )}
 
-          {/* Narrative */}
-          {hasNarrative && !running && (
-            <div
-              style={{
-                background: "rgba(11,15,23,0.5)",
-                border: "1px solid rgba(212,165,116,0.1)",
-                borderRadius: 10,
-                padding: "14px 16px",
-                marginBottom: 16,
-              }}
-            >
-              {data?.generatedAt && (
-                <div style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: "#4A4D54", letterSpacing: "0.1em", marginBottom: 10 }}>
-                  GENERATED {new Date(data.generatedAt).toLocaleString("en-US", {
-                    month: "short", day: "numeric",
-                    hour: "numeric", minute: "2-digit", hour12: true,
-                  }).toUpperCase()}
+          {/* ── ORACLE tab ── */}
+          {tab === "oracle" && !running && (
+            <>
+              {hasNarrative ? (
+                <div
+                  style={{
+                    background: "rgba(11,15,23,0.5)",
+                    border: "1px solid rgba(212,165,116,0.1)",
+                    borderRadius: 10,
+                    padding: "14px 16px",
+                    marginBottom: 16,
+                  }}
+                >
+                  {data?.generatedAt && (
+                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: "#4A4D54", letterSpacing: "0.1em", marginBottom: 10 }}>
+                      GENERATED {new Date(data.generatedAt).toLocaleString("en-US", {
+                        month: "short", day: "numeric",
+                        hour: "numeric", minute: "2-digit", hour12: true,
+                      }).toUpperCase()}
+                    </div>
+                  )}
+                  <NarrativeContent text={data!.narrative!} />
+                </div>
+              ) : hasGames ? (
+                <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "#4A4D54", marginBottom: 12, textAlign: "center" }}>
+                  Gematria oracle not generated yet — click RUN DEBRIEF.
+                </div>
+              ) : null}
+
+              {hasGames && (
+                <div>
+                  <div style={{ fontFamily: "var(--font-display)", fontSize: 8, letterSpacing: "0.18em", color: "#4A4D54", marginBottom: 8 }}>
+                    GAME BREAKDOWN
+                  </div>
+                  {data!.games.map(game => (
+                    <GameCard key={game.gameId} game={game} />
+                  ))}
                 </div>
               )}
-              <NarrativeContent text={data!.narrative!} />
-            </div>
+            </>
           )}
 
-          {/* Game breakdown */}
-          {hasGames && !running && (
-            <div>
-              <div style={{ fontFamily: "var(--font-display)", fontSize: 8, letterSpacing: "0.18em", color: "#4A4D54", marginBottom: 8 }}>
-                GAME BREAKDOWN
+          {/* ── BOT D tab ── */}
+          {tab === "botd" && !running && (
+            hasBotD ? (
+              <div
+                style={{
+                  background: "rgba(11,15,23,0.5)",
+                  border: "1px solid rgba(201,169,97,0.12)",
+                  borderRadius: 10,
+                  padding: "14px 16px",
+                }}
+              >
+                <div style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: "#4A4D54", letterSpacing: "0.1em", marginBottom: 10 }}>
+                  NARRATIVE SCOUT REFLECTION — {date}
+                </div>
+                <NarrativeContent text={data!.botDNarrative!} />
               </div>
-              {data!.games.map(game => (
-                <GameCard key={game.gameId} game={game} />
-              ))}
-            </div>
+            ) : (
+              <div style={{ textAlign: "center", padding: "60px 0" }}>
+                <p style={{ fontFamily: "var(--font-display)", fontSize: 10, letterSpacing: "0.16em", color: "#4A4D54" }}>
+                  NO BOT D REFLECTION YET
+                </p>
+                <p style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "#4A4D54", marginTop: 6 }}>
+                  Run debrief to generate Bot D&apos;s narrative reflection.
+                </p>
+              </div>
+            )
           )}
         </div>
       </div>
