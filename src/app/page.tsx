@@ -2,17 +2,9 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
-import {
-  Download,
-  Sparkles,
-  CheckCircle,
-  Moon,
-  PenLine,
-  BookOpen,
-  Trophy,
-} from "lucide-react";
+import { BookOpen } from "lucide-react";
 import LockBadge from "@/components/LockBadge";
-import { calculateDateNumerology } from "@/lib/gematria";
+import { calculateDateNumerology, calculateGematria } from "@/lib/gematria";
 import { getTodayET } from "@/lib/date-utils";
 import { isFullMoon, getFullMoonName } from "@/lib/moon-phase";
 import { getMoonIllumination } from "@/lib/moon-phase";
@@ -458,8 +450,7 @@ export default function Dashboard() {
           {[
             {
               key: "fetch", label: "Fetch Games",
-              icon: <Download size={14} className={loading === "fetch" ? "animate-spin" : ""} />,
-              loadLabel: "Fetching…", onClick: handleFetch,
+              onClick: handleFetch,
               disabled: loading !== null,
               accent: "rgba(212,165,116,0.12)", border: "rgba(212,165,116,0.2)",
             },
@@ -468,38 +459,34 @@ export default function Dashboard() {
               label: analyzeProgress
                 ? `${analyzeProgress.current}/${analyzeProgress.total}…`
                 : "Analyze & Bet",
-              icon: <Sparkles size={14} className={loading === "analyze" ? "animate-pulse" : ""} />,
-              loadLabel: "Thinking…", onClick: handleAnalyze,
+              onClick: handleAnalyze,
               disabled: loading !== null || games.length === 0,
               accent: "rgba(212,165,116,0.18)", border: "rgba(212,165,116,0.35)",
             },
             {
               key: "settle", label: "Settle Now",
-              icon: <CheckCircle size={14} className={loading === "settle" ? "animate-spin" : ""} />,
-              loadLabel: "Settling…", onClick: handleSettle,
+              onClick: handleSettle,
               disabled: loading !== null || trades.filter(t => t.bet_type !== "analysis").length === 0,
               accent: "rgba(212,165,116,0.06)", border: "rgba(30,37,50,1)",
             },
             {
               key: "manual", label: "Log Pick",
-              icon: <PenLine size={14} />, loadLabel: "Log Pick",
               onClick: () => setShowManualModal(true),
               disabled: games.length === 0,
               accent: "rgba(201,169,97,0.08)", border: "rgba(201,169,97,0.2)",
             },
             {
               key: "briefing", label: "Briefing",
-              icon: <BookOpen size={14} />, loadLabel: "Briefing",
               onClick: () => setShowBriefingModal(true),
               disabled: false,
               accent: "rgba(95,201,212,0.08)", border: "rgba(95,201,212,0.2)",
             },
-          ].map(({ key, label, icon, onClick, disabled, accent, border }) => (
+          ].map(({ key, label, onClick, disabled, accent, border }) => (
             <button
               key={key}
               onClick={onClick}
               disabled={disabled}
-              className="flex items-center justify-center gap-2 py-3 px-3 rounded-xl transition-colors disabled:opacity-35 cursor-pointer disabled:cursor-not-allowed text-sm"
+              className="flex items-center justify-center py-3 px-3 rounded-xl transition-colors disabled:opacity-35 cursor-pointer disabled:cursor-not-allowed text-sm"
               style={{
                 background: accent,
                 border: `1px solid ${border}`,
@@ -509,7 +496,6 @@ export default function Dashboard() {
                 fontSize: 11,
               }}
             >
-              {icon}
               <span>{loading === key ? "..." : label}</span>
             </button>
           ))}
@@ -623,7 +609,7 @@ export default function Dashboard() {
         </div>
 
         {/* ══════════════════════════════════════════
-            BEST PICK OF THE DAY
+            PRIMARY LOCK CARD
         ══════════════════════════════════════════ */}
         {(() => {
           const realTrades = trades.filter(t => t.bet_type !== "analysis");
@@ -632,89 +618,118 @@ export default function Dashboard() {
             : null;
           if (!best) return null;
           const game = best.game;
+
+          const awayG = game ? calculateGematria(game.away_team) : null;
+          const homeG = game ? calculateGematria(game.home_team) : null;
+
+          const CIPHERS: { label: string; key: "ordinal" | "reduction" | "reverseOrdinal" | "reverseReduction" }[] = [
+            { label: "EO", key: "ordinal" },
+            { label: "FR", key: "reduction" },
+            { label: "RO", key: "reverseOrdinal" },
+            { label: "RR", key: "reverseReduction" },
+          ];
+          const ROW_H  = 22;
+          const ROW_GAP = 3;
+          const stackH = CIPHERS.length * ROW_H + (CIPHERS.length - 1) * ROW_GAP;
+
           return (
-            <div
-              className="mb-6 p-4 rounded-xl"
-              style={{
-                background: "rgba(212,165,116,0.06)",
-                border: "1px solid rgba(212,165,116,0.2)",
-              }}
-            >
-              <div className="flex items-center gap-2 mb-2">
-                <Trophy size={12} style={{ color: "#D4A574" }} />
-                <span
-                  className="text-[10px] font-semibold tracking-widest"
-                  style={{
-                    fontFamily: "var(--font-display)",
-                    letterSpacing: "0.12em",
-                    color: "#D4A574",
-                  }}
-                >
-                  BEST PICK OF THE DAY
+            <div className="mb-6 card-lock">
+              {/* ── Header ── */}
+              <div className="flex items-center justify-between mb-4">
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.18em", color: "#D4A574" }}>
+                  PRIMARY LOCK · {String(1).padStart(2, "0")} / {String(realTrades.length).padStart(2, "0")}
                 </span>
-              </div>
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5 mb-1 flex-wrap">
-                    <span
-                      className="text-[10px] font-bold px-1.5 py-0.5 rounded"
-                      style={{
-                        fontFamily: "var(--font-display)",
-                        letterSpacing: "0.08em",
-                        background: "rgba(212,165,116,0.12)",
-                        color: "#D4A574",
-                      }}
-                    >
-                      BOT {best.bot}
-                    </span>
-                    <LockBadge lockType={best.lock_type} />
-                    {game && (
-                      <span
-                        className="text-[10px]"
-                        style={{ fontFamily: "var(--font-mono)", color: "#8A8578" }}
-                      >
-                        {game.league}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-sm font-semibold text-bone">{best.pick}</div>
-                  {game && (
-                    <div
-                      className="text-[10px] mt-0.5"
-                      style={{ fontFamily: "var(--font-mono)", color: "#8A8578" }}
-                    >
-                      {game.away_team} @ {game.home_team}
-                    </div>
-                  )}
-                  {best.reasoning && (
-                    <div
-                      className="text-[10px] mt-1.5 leading-relaxed line-clamp-2"
-                      style={{ color: "#8A8578" }}
-                    >
-                      {best.reasoning}
-                    </div>
-                  )}
-                </div>
-                <div className="text-right shrink-0">
-                  <div
-                    className="text-xs"
-                    style={{ fontFamily: "var(--font-mono)", color: "#8A8578" }}
+                <div className="flex items-center gap-1.5">
+                  <span
+                    className="text-[10px] px-1.5 py-0.5 rounded"
+                    style={{ fontFamily: "var(--font-display)", letterSpacing: "0.08em", background: "rgba(212,165,116,0.12)", color: "#D4A574" }}
                   >
+                    BOT {best.bot}
+                  </span>
+                  <LockBadge lockType={best.lock_type} />
+                  {game && <span className="text-[10px]" style={{ fontFamily: "var(--font-mono)", color: "#8A8578" }}>{game.league}</span>}
+                </div>
+              </div>
+
+              {/* ── Pick + confidence ── */}
+              <div className="flex items-baseline justify-between mb-4">
+                <div className="text-sm font-semibold text-bone">{best.pick}</div>
+                <div className="text-right shrink-0 ml-3">
+                  <div className="text-xs" style={{ fontFamily: "var(--font-mono)", color: "#8A8578" }}>
                     {best.odds != null ? (best.odds > 0 ? `+${best.odds}` : String(best.odds)) : "—"}
                   </div>
-                  <div
-                    className="text-2xl font-bold"
-                    style={{
-                      fontFamily: "var(--font-mono)",
-                      color: "#D4A574",
-                      fontVariantNumeric: "tabular-nums",
-                    }}
-                  >
+                  <div className="text-2xl font-bold" style={{ fontFamily: "var(--font-mono)", color: "#D4A574", fontVariantNumeric: "tabular-nums" }}>
                     {Math.round(best.confidence ?? 0)}%
                   </div>
                   <div className="text-[9px] text-smoke">confidence</div>
                 </div>
               </div>
+
+              {/* ── Cipher stack ── */}
+              {game && awayG && homeG && (
+                <div style={{ position: "relative", marginBottom: 12 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", columnGap: 12 }}>
+                    {/* Away cipher column */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: ROW_GAP, alignItems: "flex-end" }}>
+                      {CIPHERS.map(({ label, key }) => {
+                        const av = awayG[key];
+                        const match = av === homeG[key];
+                        return (
+                          <div key={label} style={{ height: ROW_H, display: "flex", alignItems: "center", gap: 5 }}>
+                            <span style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: match ? "#5FC9D4" : "#4A4D54", letterSpacing: "0.1em" }}>{label}</span>
+                            <span style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 700, color: match ? "#5FC9D4" : "#8A8578" }}>{av}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Center: team matchup */}
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: stackH, textAlign: "center", minWidth: 80 }}>
+                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "#8A8578", lineHeight: 1.4 }}>{game.away_team}</span>
+                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "#4A4D54", margin: "2px 0" }}>@</span>
+                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "#8A8578", lineHeight: 1.4 }}>{game.home_team}</span>
+                    </div>
+
+                    {/* Home cipher column */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: ROW_GAP, alignItems: "flex-start" }}>
+                      {CIPHERS.map(({ label, key }) => {
+                        const hv = homeG[key];
+                        const match = awayG[key] === hv;
+                        return (
+                          <div key={label} style={{ height: ROW_H, display: "flex", alignItems: "center", gap: 5 }}>
+                            <span style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 700, color: match ? "#5FC9D4" : "#8A8578" }}>{hv}</span>
+                            <span style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: match ? "#5FC9D4" : "#4A4D54", letterSpacing: "0.1em" }}>{label}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Hairline connectors across matching cipher rows */}
+                  <svg
+                    aria-hidden="true"
+                    style={{ position: "absolute", top: 0, left: 0, width: "100%", height: stackH, pointerEvents: "none", overflow: "visible" }}
+                  >
+                    {CIPHERS.map(({ label, key }, i) => {
+                      if (awayG[key] !== homeG[key]) return null;
+                      const y = i * (ROW_H + ROW_GAP) + ROW_H / 2;
+                      return (
+                        <line key={label} x1="0" y1={y} x2="100%" y2={y} stroke="#5FC9D4" strokeWidth="0.5" strokeOpacity="0.25" />
+                      );
+                    })}
+                  </svg>
+                </div>
+              )}
+
+              {/* ── Reasoning prose ── */}
+              {best.reasoning && (
+                <div
+                  className="text-[10px] leading-relaxed line-clamp-3"
+                  style={{ color: "#8A8578", borderTop: "1px solid rgba(212,165,116,0.1)", paddingTop: 10 }}
+                >
+                  {best.reasoning}
+                </div>
+              )}
             </div>
           );
         })()}

@@ -53,15 +53,24 @@
 
   body {
     background-color: var(--color-void);
-    background-image: radial-gradient(
-      ellipse 80% 60% at 50% 28%,
-      #0B0F17 0%,
-      #05070B 72%
-    );
+    background-image: radial-gradient(circle at center, #0B0F17 0%, #05070B 100%);
     background-attachment: fixed;
     color: var(--color-bone);
     font-family: var(--font-ui);
-    padding-left: 72px; /* fixed sidebar offset */
+    padding-left: 72px;
+  }
+
+  /* Flower of Life — tiled across all pages at 6% opacity */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0.06;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='58' height='50.2'%3E%3Ccircle cx='29' cy='25.1' r='14.5' fill='none' stroke='%23D4A574' stroke-width='0.6'/%3E%3Ccircle cx='29' cy='10.6' r='14.5' fill='none' stroke='%23D4A574' stroke-width='0.6'/%3E%3Ccircle cx='29' cy='39.6' r='14.5' fill='none' stroke='%23D4A574' stroke-width='0.6'/%3E%3Ccircle cx='16.4' cy='18' r='14.5' fill='none' stroke='%23D4A574' stroke-width='0.6'/%3E%3Ccircle cx='41.6' cy='18' r='14.5' fill='none' stroke='%23D4A574' stroke-width='0.6'/%3E%3Ccircle cx='16.4' cy='32.2' r='14.5' fill='none' stroke='%23D4A574' stroke-width='0.6'/%3E%3Ccircle cx='41.6' cy='32.2' r='14.5' fill='none' stroke='%23D4A574' stroke-width='0.6'/%3E%3C%2Fsvg%3E");
+    background-repeat: repeat;
+    background-size: 58px 50.2px;
   }
 
   /* Film-grain noise — kills the "AI dashboard" feel */
@@ -93,15 +102,15 @@
 
   /* ── Tier 1 LOCK — glassmorphism + amber glow ── */
   .card-lock {
-    background: rgba(20, 25, 35, 0.62);
+    background: rgba(20, 25, 35, 0.55);
     backdrop-filter: blur(20px) saturate(140%);
     -webkit-backdrop-filter: blur(20px) saturate(140%);
     border: 1px solid rgba(212, 165, 116, 0.6);
     border-radius: 0.75rem;
     padding: 1.25rem;
     box-shadow:
-      0 0 40px -10px rgba(244, 184, 96, 0.35),
-      inset 0 0 0 1px rgba(212, 165, 116, 0.12);
+      0 0 40px -10px var(--color-amber-hot),
+      inset 0 0 0 1px rgba(212, 165, 116, 0.15);
     transition: border-color 180ms ease-out, transform 180ms ease-out, box-shadow 180ms ease-out;
   }
 
@@ -152,7 +161,7 @@
     transform: translateY(-2px);
     border-color: rgba(212, 165, 116, 0.85);
     box-shadow:
-      0 0 55px -8px rgba(244, 184, 96, 0.5),
+      0 0 55px -8px var(--color-amber-hot),
       inset 0 0 0 1px rgba(212, 165, 116, 0.22);
   }
   .card-pass:hover { opacity: 0.72; }
