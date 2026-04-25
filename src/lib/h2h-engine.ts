@@ -154,8 +154,13 @@ export async function getH2HContext(
       .limit(20),
   ])
 
-  // Also fetch each team's games in the opposite role for full form picture
-  const [homeAsAwayRes, awayAsHomeRes] = await Promise.all([
+  // Recent settled games from the current-season games table (last 14 days)
+  const twoWeeksAgo = new Date(gameDate)
+  twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14)
+  const twoWeeksAgoStr = twoWeeksAgo.toISOString().slice(0, 10)
+
+  // Also fetch each team's games in the opposite role + recent settled scores
+  const [homeAsAwayRes, awayAsHomeRes, recentSettledRes] = await Promise.all([
     sb.from('historical_games')
       .select('id, game_date, home_team, away_team, home_score, away_score, league')
       .eq('league', league)
@@ -171,7 +176,24 @@ export async function getH2HContext(
       .lt('game_date', gameDate)
       .order('game_date', { ascending: false })
       .limit(20),
+
+    // Pull settled games from the live games table — filtered in-code to avoid
+    // Supabase OR issues with team names containing spaces
+    sb.from('games')
+      .select('id, game_date, home_team, away_team, home_score, away_score, status')
+      .eq('league', league)
+      .eq('status', 'final')
+      .gte('game_date', twoWeeksAgoStr)
+      .lt('game_date', gameDate)
+      .order('game_date', { ascending: false })
+      .limit(30),
   ])
+
+  // Keep only games that involve homeTeam or awayTeam
+  const recentGames = (recentSettledRes.data ?? []).filter(g =>
+    g.home_team === homeTeam || g.away_team === homeTeam ||
+    g.home_team === awayTeam || g.away_team === awayTeam
+  )
 
   // Merge H2H games (both directions), deduplicate, sort descending
   const h2hMerged: HistoricalGame[] = [
@@ -194,8 +216,25 @@ export async function getH2HContext(
 
   const totalHistorical = asHomeRes.data?.length ?? 0 + (asAwayRes.data?.length ?? 0)
 
+  // Build grounding block from verified settled results — MUST appear first in context
+  const groundingLines: string[] = [
+    '=== RECENT COMPLETED GAMES (verified results — use ONLY this data for recent form) ===',
+  ]
+  if (recentGames.length > 0) {
+    for (const g of recentGames) {
+      groundingLines.push(
+        `${g.game_date}  ${g.home_team} ${g.home_score ?? '?'} — ${g.away_team} ${g.away_score ?? '?'}`
+      )
+    }
+  } else {
+    groundingLines.push('(No settled games found in the last 14 days for these teams)')
+  }
+  groundingLines.push('NOTE: Do NOT reference, infer, or fabricate any game result not listed above.')
+  groundingLines.push('')
+  const groundingBlock = groundingLines.join('\n')
+
   if (totalHistorical === 0 && homeAllGames.length === 0) {
-    return '=== MATCHUP HISTORY & TEAM STATS ===\n(No historical data yet — run scripts/backfill-historical.mjs to populate 6-year archive)'
+    return groundingBlock + '=== MATCHUP HISTORY & TEAM STATS ===\n(No historical data yet — run scripts/backfill-historical.mjs to populate 6-year archive)'
   }
 
   const lines: string[] = ['=== MATCHUP HISTORY & TEAM STATS ===']
@@ -285,5 +324,5 @@ export async function getH2HContext(
   lines.push(formatForm(homeForm, homeTeam, 'HOME'))
   lines.push(formatForm(awayForm, awayTeam, 'AWAY'))
 
-  return lines.join('\n')
+  return groundingBlock + lines.join('\n')
 }
