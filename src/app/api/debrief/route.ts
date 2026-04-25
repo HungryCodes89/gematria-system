@@ -239,7 +239,9 @@ function buildBotDReflectionPrompt(breakdown: GameBreakdown[], date: string): st
         const icon = e.result === "win" || e.result === "lean_hit" ? "✓"
           : e.result === "loss" || e.result === "lean_miss" ? "✗" : "–";
         const label = e.betType === "analysis" ? "LEAN" : "BET";
-        lines.push(`  MY CALL: ${icon} ${label} ${e.pick} (conf=${e.confidence ?? "?"}%)`);
+        const oddsStr = e.odds != null ? (e.odds > 0 ? `+${e.odds}` : String(e.odds)) : "";
+        const plStr = e.profitLoss > 0 ? `+$${e.profitLoss.toFixed(0)}` : e.profitLoss < 0 ? `-$${Math.abs(e.profitLoss).toFixed(0)}` : "";
+        lines.push(`  MY CALL: ${icon} ${label} ${e.pick} ${oddsStr} — ${e.result.toUpperCase()}${plStr ? ` ${plStr}` : ""} (conf=${e.confidence ?? "?"}%)`);
         if (e.reasoning) {
           lines.push(`  MY READ: "${e.reasoning.slice(0, 280).replace(/\n/g, " ")}"`);
         }
