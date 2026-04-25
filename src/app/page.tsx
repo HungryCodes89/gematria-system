@@ -740,14 +740,14 @@ export default function Dashboard() {
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: stackH, textAlign: "center", minWidth: 80 }}>
                       <span style={{
                         fontFamily: "var(--font-mono)", fontSize: 9, lineHeight: 1.4,
-                        color: best.pickedSide === "away" ? "#F4B860" : "#8A8578",
-                        fontWeight: best.pickedSide === "away" ? 700 : 400,
+                        color: best.picked_side === "away" ? "#F4B860" : "#8A8578",
+                        fontWeight: best.picked_side === "away" ? 700 : 400,
                       }}>{game.away_team}</span>
                       <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "#4A4D54", margin: "2px 0" }}>@</span>
                       <span style={{
                         fontFamily: "var(--font-mono)", fontSize: 9, lineHeight: 1.4,
-                        color: best.pickedSide === "home" ? "#5FC9D4" : "#8A8578",
-                        fontWeight: best.pickedSide === "home" ? 700 : 400,
+                        color: best.picked_side === "home" ? "#5FC9D4" : "#8A8578",
+                        fontWeight: best.picked_side === "home" ? 700 : 400,
                       }}>{game.home_team}</span>
                     </div>
 
