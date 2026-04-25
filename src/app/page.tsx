@@ -14,6 +14,7 @@ import GameCard from "@/components/GameCard";
 import ManualPickModal from "@/components/ManualPickModal";
 import GameDetailModal from "@/components/GameDetailModal";
 import BriefingModal from "@/components/BriefingModal";
+import DebriefModal from "@/components/DebriefModal";
 
 type League = "ALL" | "NBA" | "NHL" | "MLB";
 type BotSelection = "all" | "A" | "B" | "C" | "D";
@@ -85,6 +86,7 @@ export default function Dashboard() {
     wins: number | null; losses: number | null; dailyPL: number | null;
   } | null>(null);
   const [showBriefingModal, setShowBriefingModal] = useState(false);
+  const [showDebriefModal, setShowDebriefModal]   = useState(false);
   const [reanalyzingId, setReanalyzingId]       = useState<string | null>(null);
   const [notes, setNotes]         = useState("");
   const [notesSaving, setNotesSaving] = useState(false);
@@ -446,7 +448,7 @@ export default function Dashboard() {
         {/* ══════════════════════════════════════════
             ACTION BUTTONS
         ══════════════════════════════════════════ */}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-4">
           {[
             {
               key: "fetch", label: "Fetch Games",
@@ -480,6 +482,12 @@ export default function Dashboard() {
               onClick: () => setShowBriefingModal(true),
               disabled: false,
               accent: "rgba(95,201,212,0.08)", border: "rgba(95,201,212,0.2)",
+            },
+            {
+              key: "debrief", label: "Debrief",
+              onClick: () => setShowDebriefModal(true),
+              disabled: false,
+              accent: "rgba(139,38,53,0.1)", border: "rgba(139,38,53,0.25)",
             },
           ].map(({ key, label, onClick, disabled, accent, border }) => (
             <button
@@ -832,6 +840,10 @@ export default function Dashboard() {
 
       {showBriefingModal && (
         <BriefingModal onClose={() => setShowBriefingModal(false)} />
+      )}
+
+      {showDebriefModal && (
+        <DebriefModal onClose={() => setShowDebriefModal(false)} />
       )}
     </div>
   );
