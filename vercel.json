@@ -7,7 +7,8 @@
     "src/app/api/cron/weekly-summary/route.ts": { "maxDuration": 120 },
     "src/app/api/reflection/route.ts": { "maxDuration": 300 },
     "src/app/api/cron/reflection/route.ts": { "maxDuration": 300 },
-    "src/app/api/fetch-games/route.ts": { "maxDuration": 60 }
+    "src/app/api/fetch-games/route.ts": { "maxDuration": 60 },
+    "src/app/api/cron/debrief/route.ts": { "maxDuration": 120 }
   },
   "crons": [
     {
@@ -29,6 +30,10 @@
     {
       "path": "/api/cron/reflection",
       "schedule": "0 11 * * *"
+    },
+    {
+      "path": "/api/cron/debrief",
+      "schedule": "0 12 * * *"
     }
   ]
 }
