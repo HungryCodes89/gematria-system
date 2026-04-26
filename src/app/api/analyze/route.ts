@@ -24,6 +24,7 @@ const AUTO_BET_MAP: Record<LockType, keyof GematriaSettings | null> = {
   triple_lock:    "auto_bet_triple_locks",
   double_lock:    "auto_bet_double_locks",
   single_lock:    "auto_bet_single_locks",
+  lean:           null,  // lean decisions bypass AUTO_BET_MAP — routed to lean_tracked
   sacrifice_lock: "auto_bet_triple_locks",
   no_lock:        null,
 };
@@ -145,6 +146,7 @@ function sizeWithPriceModifier(decision: ReconciledDecision): ReconciledDecision
 interface GatheredResult {
   logs: DecisionLog[];
   betDecisions: BotDecision[];
+  leanDecisions: BotDecision[];
 }
 
 async function gatherEligibleBets(
@@ -158,6 +160,7 @@ async function gatherEligibleBets(
 ): Promise<GatheredResult> {
   const logs: DecisionLog[] = [];
   const betDecisions: BotDecision[] = [];
+  const leanDecisions: BotDecision[] = [];
 
   const saveAnalysisRecord = (decision: TradeDecision, lockType: string) =>
     supabase.from("paper_trades").upsert({
@@ -192,6 +195,28 @@ async function gatherEligibleBets(
       claudeConfidence: decision.confidence,
       engineLockType: analysis.lockType,
     };
+
+    if (decision.action === "lean") {
+      // Lean tier — real directional signal but below bet threshold. Tracked only, no position.
+      console.log(`[gather] Bot ${bot} [${idx}] LEAN — pick="${decision.pick}" conf=${decision.confidence}%`);
+      leanDecisions.push({
+        action: "lean",
+        bot,
+        lock_type: "lean",
+        bet_type: decision.betType,
+        pick: decision.pick,
+        picked_side: decision.pickedSide ?? null,
+        odds: decision.odds,
+        implied_probability: decision.impliedProbability,
+        model_probability: decision.modelProbability,
+        ev: decision.ev,
+        units: decision.units,
+        confidence: decision.confidence,
+        reasoning: decision.reasoning,
+      });
+      logs.push({ ...base, placed: false, skipReason: "lean_tracked" });
+      continue;
+    }
 
     if (decision.action !== "bet") {
       const reason = "Claude returned action=skip";
@@ -243,6 +268,7 @@ async function gatherEligibleBets(
 
     // Passed all gates — defer to reconciliation
     betDecisions.push({
+      action: "bet",
       bot,
       lock_type: effectiveLockType,
       bet_type: decision.betType,
@@ -259,7 +285,7 @@ async function gatherEligibleBets(
     logs.push({ ...base, placed: false, skipReason: "pending_reconciliation" });
   }
 
-  return { logs, betDecisions };
+  return { logs, betDecisions, leanDecisions };
 }
 
 // ── Write disagreement to skipped_picks ──────────────────────────────────
@@ -350,6 +376,49 @@ async function placeReconciledBet(
       console.error(`[reconcile] Run: ALTER TABLE paper_trades DROP CONSTRAINT paper_trades_bot_check; ALTER TABLE paper_trades ADD CONSTRAINT paper_trades_bot_check CHECK (bot IN ('A','B','C','D'));`);
     }
     return false;
+  }
+}
+
+// ── Write lean_tracked row (no position, result tracking only) ────────────
+
+async function writeLeanTracked(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  game: Game,
+  decision: ReconciledDecision,
+): Promise<void> {
+  const { error } = await supabase.from("paper_trades").insert({
+    game_id: game.id,
+    bot: decision.bot,
+    bet_type: "lean_tracked",
+    pick: decision.pick,
+    picked_side: decision.picked_side,
+    odds: decision.odds,
+    implied_probability: decision.implied_probability,
+    model_probability: decision.model_probability,
+    ev: decision.ev,
+    units: 0,
+    stake: 0,
+    potential_profit: 0,
+    result: null,
+    profit_loss: 0,
+    confidence: decision.confidence,
+    lock_type: "lean",
+    reasoning: decision.reasoning,
+    opening_line: extractOpeningLine(game, decision.bet_type, decision.picked_side),
+    strategy_version: "v1",
+    convergence_count: decision.convergence_count,
+    convergent_bots: decision.convergent_bots,
+    sizing_note: decision.sizing_note,
+    was_reconciled: true,
+    placed_at: new Date().toISOString(),
+  });
+  if (error) {
+    console.error(`[lean] DB INSERT FAILED for game ${game.id}: ${error.message}`);
+  } else {
+    console.log(
+      `[lean] TRACKED — ${decision.pick} @ ${decision.odds > 0 ? "+" : ""}${decision.odds}` +
+      ` conf=${decision.confidence}% bots=[${decision.convergent_bots.join(",")}]`
+    );
   }
 }
 
@@ -584,13 +653,14 @@ export async function POST(req: NextRequest) {
           let analysisA: GameAnalysisResult | null = null;
           let logsA: DecisionLog[] = [];
           let betDecisionsA: BotDecision[] = [];
+          let leanDecisionsA: BotDecision[] = [];
           const skipA = runA && !forceReanalyze && alreadyProcessed(game.id, botAState.gameIds);
           if (runA && !skipA) {
             console.log(`[analyze] Bot A analyzing ${game.away_team} @ ${game.home_team}`);
             const { analysis, decisions } = await analyzeGameWithClaude(game, settings, "A", todayNotes, matchedPatterns, provenPatternsA.length > 0 ? provenPatternsA : undefined, sacrificePatternsA.length > 0 ? sacrificePatternsA : undefined, h2hCtx);
             analysisA = analysis;
             const g = await gatherEligibleBets(supabase, game, decisions, analysis, "A", settings, botAState);
-            logsA = g.logs; betDecisionsA = g.betDecisions;
+            logsA = g.logs; betDecisionsA = g.betDecisions; leanDecisionsA = g.leanDecisions;
           } else if (skipA) {
             console.log(`[analyze] Bot A skip — already processed game ${game.id}`);
           }
@@ -599,13 +669,14 @@ export async function POST(req: NextRequest) {
           let analysisB: GameAnalysisResult | null = null;
           let logsB: DecisionLog[] = [];
           let betDecisionsB: BotDecision[] = [];
+          let leanDecisionsB: BotDecision[] = [];
           const skipB = runB && !forceReanalyze && alreadyProcessed(game.id, botBState.gameIds);
           if (runB && !skipB) {
             console.log(`[analyze] Bot B analyzing ${game.away_team} @ ${game.home_team}`);
             const { analysis, decisions } = await analyzeGameWithClaude(game, botBSettings, "B", todayNotes, matchedPatterns, provenPatternsB.length > 0 ? provenPatternsB : undefined, sacrificePatternsB.length > 0 ? sacrificePatternsB : undefined, h2hCtx);
             analysisB = analysis;
             const g = await gatherEligibleBets(supabase, game, decisions, analysis, "B", settings, botBState);
-            logsB = g.logs; betDecisionsB = g.betDecisions;
+            logsB = g.logs; betDecisionsB = g.betDecisions; leanDecisionsB = g.leanDecisions;
           } else if (skipB) {
             console.log(`[analyze] Bot B skip — already processed game ${game.id}`);
           }
@@ -614,13 +685,14 @@ export async function POST(req: NextRequest) {
           let analysisC: GameAnalysisResult | null = null;
           let logsC: DecisionLog[] = [];
           let betDecisionsC: BotDecision[] = [];
+          let leanDecisionsC: BotDecision[] = [];
           const skipC = runC && !forceReanalyze && alreadyProcessed(game.id, botCState.gameIds);
           if (runC && !skipC) {
             console.log(`[analyze] Bot C analyzing ${game.away_team} @ ${game.home_team}`);
             const { analysis, decisions } = await analyzeGameWithClaude(game, botCSettings, "C", todayNotes, matchedPatterns, provenPatternsC.length > 0 ? provenPatternsC : undefined, sacrificePatternsC.length > 0 ? sacrificePatternsC : undefined, h2hCtx);
             analysisC = analysis;
             const g = await gatherEligibleBets(supabase, game, decisions, analysis, "C", settings, botCState);
-            logsC = g.logs; betDecisionsC = g.betDecisions;
+            logsC = g.logs; betDecisionsC = g.betDecisions; leanDecisionsC = g.leanDecisions;
           } else if (skipC) {
             console.log(`[analyze] Bot C skip — already processed game ${game.id}`);
           }
@@ -629,6 +701,7 @@ export async function POST(req: NextRequest) {
           let analysisD: GameAnalysisResult | null = null;
           let logsD: DecisionLog[] = [];
           let betDecisionsD: BotDecision[] = [];
+          let leanDecisionsD: BotDecision[] = [];
           const skipD = runD && !forceReanalyze && alreadyProcessed(game.id, botDState.gameIds);
           if (runD && !skipD) {
             console.log(`[analyze] Bot D analyzing ${game.away_team} @ ${game.home_team}`);
@@ -639,7 +712,7 @@ export async function POST(req: NextRequest) {
             });
             analysisD = analysis;
             const g = await gatherEligibleBets(supabase, game, decisions, analysis, "D", settings, botDState);
-            logsD = g.logs; betDecisionsD = g.betDecisions;
+            logsD = g.logs; betDecisionsD = g.betDecisions; leanDecisionsD = g.leanDecisions;
           } else if (skipD) {
             console.log(`[analyze] Bot D skip — already processed game ${game.id}`);
           } else if (!runD) {
@@ -650,20 +723,35 @@ export async function POST(req: NextRequest) {
           const allBetDecisions = [
             ...betDecisionsA, ...betDecisionsB, ...betDecisionsC, ...betDecisionsD,
           ];
-          let reconcileOutcome: "no_eligible_bets" | "skipped" | "placed" = "no_eligible_bets";
+          const allLeanDecisions = [
+            ...leanDecisionsA, ...leanDecisionsB, ...leanDecisionsC, ...leanDecisionsD,
+          ];
+          let reconcileOutcome: "no_eligible_bets" | "skipped" | "placed" | "lean_tracked" = "no_eligible_bets";
 
           if (allBetDecisions.length > 0) {
+            // Bet decisions take full precedence — leans on same game are ignored
             const reconciled = reconcileBotDecisions(allBetDecisions, game);
-
             if (reconciled === null) {
-              // Bots disagree — log to skipped_picks, write NO trade
               await writeSkippedPick(supabase, game.id, "bot_disagreement", allBetDecisions);
-              skippedGameIds.add(game.id); // dedup within this session
+              skippedGameIds.add(game.id);
               reconcileOutcome = "skipped";
             } else {
               const sized = sizeWithPriceModifier(reconciled);
               await placeReconciledBet(supabase, game, sized, settings, botStates);
               reconcileOutcome = "placed";
+            }
+          } else if (allLeanDecisions.length > 0) {
+            // No bets — try lean reconciliation
+            const reconciledLean = reconcileBotDecisions(allLeanDecisions, game);
+            if (reconciledLean === null) {
+              await writeSkippedPick(supabase, game.id, "lean_disagreement", allLeanDecisions);
+              skippedGameIds.add(game.id);
+              reconcileOutcome = "skipped";
+            } else {
+              // sizing_note already built by reconcileBotDecisions; override units to 0
+              const leanDecision: ReconciledDecision = { ...reconciledLean, units: 0 };
+              await writeLeanTracked(supabase, game, leanDecision);
+              reconcileOutcome = "lean_tracked";
             }
           }
           // ──────────────────────────────────────────────────────────────

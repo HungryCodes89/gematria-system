@@ -6,11 +6,17 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const sb = getSupabaseAdmin();
 
-  const [tradesRes, ledgerRes, lastSettledRes] = await Promise.all([
+  const [tradesRes, leanRes, ledgerRes, lastSettledRes] = await Promise.all([
     sb
       .from("paper_trades")
       .select("*, game:games(*)")
       .in("result", ["pending", "pass"])
+      .order("placed_at", { ascending: false }),
+    sb
+      .from("paper_trades")
+      .select("*, game:games(*)")
+      .eq("bet_type", "lean_tracked")
+      .is("result", null)
       .order("placed_at", { ascending: false }),
     sb
       .from("bankroll_ledger")
@@ -29,7 +35,10 @@ export async function GET() {
     return NextResponse.json({ error: tradesRes.error.message }, { status: 500 });
   }
 
-  const trades = (tradesRes.data ?? []).map((row) => {
+  const trades = [
+    ...(tradesRes.data ?? []),
+    ...(leanRes.data ?? []),
+  ].map((row) => {
     const { game, ...rest } = row;
     return { ...rest, game };
   });

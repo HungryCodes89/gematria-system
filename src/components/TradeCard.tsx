@@ -42,8 +42,8 @@ function formatClv(clv: number): string {
 export default function TradeCard({ trade }: TradeCardProps) {
   const [expanded, setExpanded] = useState(false);
   const game = trade.game;
-  const resultStyle = RESULT_STYLES[trade.result] || "";
-  const badge = RESULT_BADGES[trade.result] || RESULT_BADGES.pending;
+  const resultStyle = RESULT_STYLES[trade.result ?? "pending"] || "";
+  const badge = RESULT_BADGES[trade.result ?? "pending"] || RESULT_BADGES.pending;
 
   const dateStr = trade.placed_at
     ? new Date(trade.placed_at).toLocaleDateString("en-US", {

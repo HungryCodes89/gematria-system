@@ -167,7 +167,7 @@ export default function GameDetailModal({ game, onClose }: GameDetailModalProps)
                     trade.result === "push" ? "bg-warning/20 text-warning" :
                     "bg-zinc-700/40 text-zinc-400"
                   }`}>
-                    {trade.result.toUpperCase()}
+                    {(trade.result ?? "tracked").toUpperCase()}
                   </span>
                 </div>
                 <div className="flex items-baseline gap-3 mb-2 flex-wrap">

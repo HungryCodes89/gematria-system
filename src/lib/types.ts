@@ -84,7 +84,7 @@ export interface ConsolidatedOdds {
 // ── Trade Decision (Claude output) ──
 
 export interface TradeDecision {
-  action: "bet" | "skip";
+  action: "bet" | "lean" | "skip";
   betType: "moneyline" | "over_under";
   pick: string;
   pickedSide: "home" | "away" | null;
@@ -103,7 +103,7 @@ export interface PaperTrade {
   id: string;
   game_id: string;
   bot: "A" | "B" | "C" | "D";
-  bet_type: "moneyline" | "over_under" | "analysis";
+  bet_type: "moneyline" | "over_under" | "analysis" | "lean_tracked";
   pick: string;
   picked_side: "home" | "away" | null;
   odds: number | null;
@@ -113,7 +113,7 @@ export interface PaperTrade {
   units: number;
   stake: number;
   potential_profit: number | null;
-  result: "pending" | "win" | "loss" | "push" | "void" | "pass";
+  result: "pending" | "win" | "loss" | "push" | "void" | "pass" | null;
   profit_loss: number;
   confidence: number | null;
   lock_type: string | null;
@@ -180,6 +180,7 @@ export type LockType =
   | "triple_lock"
   | "double_lock"
   | "single_lock"
+  | "lean"
   | "sacrifice_lock"
   | "no_lock";
 
@@ -236,6 +237,7 @@ export interface DateNumerology {
 // ── Bot Reconciliation ──
 
 export interface BotDecision {
+  action: "bet" | "lean";
   bot: "A" | "B" | "C" | "D";
   lock_type: LockType;
   bet_type: "moneyline" | "over_under";

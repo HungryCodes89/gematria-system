@@ -142,15 +142,17 @@ export default function GameCard({
   const [showBooks, setShowBooks] = useState(false);
 
   const odds = game.polymarket_odds;
-  const realBets  = trades.filter((t) => t.bet_type !== "analysis");
-  const passLeans = trades.filter((t) => t.bet_type === "analysis");
-  const hasBets  = realBets.length > 0;
-  const hasLeans = passLeans.length > 0;
+  const realBets   = trades.filter((t) => t.bet_type !== "analysis" && t.bet_type !== "lean_tracked");
+  const passLeans  = trades.filter((t) => t.bet_type === "analysis");
+  const leanTracks = trades.filter((t) => t.bet_type === "lean_tracked");
+  const hasBets      = realBets.length > 0;
+  const hasLeans     = passLeans.length > 0;
+  const hasLeanTrack = leanTracks.length > 0;
 
   /* ── Tier determination ── */
   const lockType = (realBets[0]?.lock_type ?? game.lock_type ?? "no_lock") as string;
   const isLockTier = lockType === "triple_lock" || lockType === "double_lock";
-  const isLeanTier = !isLockTier && (lockType === "single_lock" || hasBets || hasLeans || game.analyzed);
+  const isLeanTier = !isLockTier && (lockType === "single_lock" || hasBets || hasLeans || hasLeanTrack || game.analyzed);
   const isPassTier = !isLockTier && !isLeanTier;
   const isSacrifice = lockType === "sacrifice_lock";
 
@@ -396,7 +398,7 @@ export default function GameCard({
       )}
 
       {/* ── Bot picks + leans ── */}
-      {(hasBets || hasLeans) && (
+      {(hasBets || hasLeans || hasLeanTrack) && (
         <div className="mt-2 pt-2 border-t border-fog/50 space-y-1">
           {realBets.map((t) => (
             <div key={t.id} className="flex items-center gap-1.5 text-xs justify-center">
@@ -411,6 +413,28 @@ export default function GameCard({
                 style={{ fontFamily: "var(--font-mono)" }}
               >
                 {t.pick} · {t.units}u
+              </span>
+            </div>
+          ))}
+          {leanTracks.map((t) => (
+            <div key={t.id} className="flex items-center gap-1.5 text-xs justify-center">
+              <span
+                className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${BOT_BADGE[t.bot] ?? "bg-fog text-ash"}`}
+                style={{ fontFamily: "var(--font-display)", letterSpacing: "0.06em" }}
+              >
+                {t.bot}
+              </span>
+              <span
+                className="truncate"
+                style={{ fontFamily: "var(--font-mono)", color: "#5FC9D4", fontSize: 10 }}
+              >
+                {t.pick}
+              </span>
+              <span
+                className="shrink-0"
+                style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "#4A4D54", letterSpacing: "0.06em" }}
+              >
+                TRACKED
               </span>
             </div>
           ))}

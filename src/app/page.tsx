@@ -237,7 +237,7 @@ export default function Dashboard() {
 
   /* Hero strip counts */
   const lockCount = games.filter(g => g.lock_type === "triple_lock" || g.lock_type === "double_lock").length;
-  const leanCount = games.filter(g => g.lock_type === "single_lock").length;
+  const leanCount = trades.filter(t => t.bet_type === "lean_tracked").length;
   const betsSet   = new Set(trades.filter(t => t.bet_type !== "analysis").map(t => t.game_id));
   const passCount = games.filter(g => g.analyzed && !betsSet.has(g.id)).length;
 

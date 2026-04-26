@@ -445,22 +445,29 @@ Confidence: ${analysis.gematriaConfidence}%${bot === "A" ? `\nFavored Side: ${an
 
 function buildSystemMessage(settings: GematriaSettings): string {
   const jsonInstructions = `
+LOCK TIER TAXONOMY — Three conviction levels, each triggers different system behavior:
+
+  "bet" + lock_type "triple_lock" — Highest conviction. 3+ cipher/pattern alignments converging. Your strongest call. Full position.
+  "bet" + lock_type "double_lock" — Solid conviction. Clear cipher logic, 2+ alignments. Confident pick. Normal position.
+  "lean" — Moderate signal. You see a directional edge but alignment is weaker, fewer pattern hits, or conviction doesn't justify a full position. Return action "lean" — the system will track this pick and measure your hit rate, but will NOT place a bet. Only use lean when you would genuinely take the bet at a smaller size if forced — not as a fallback when you're unsure. A lean is a real read, just less of it.
+  "skip" — Signal below lean threshold. You have no meaningful directional read. Still include full reasoning explaining what you saw and why it didn't reach lean threshold.
+
 RESPONSE FORMAT — You must respond with valid JSON only. No markdown, no explanation outside the JSON.
 Return an array of trade decision objects. Each object must have:
 {
-  "action": "bet" | "skip",
+  "action": "bet" | "lean" | "skip",
   "betType": "moneyline" | "over_under",
-  "pick": "<team name or Over/Under X.X>",
+  "pick": "<team name or Over/Under X.X — required even on lean/skip, use your directional read>",
   "pickedSide": "home" | "away" | null,
   "odds": <american odds number or 0 if skipping>,
   "impliedProbability": <0-1>,
   "modelProbability": <0-1>,
   "ev": <expected value as decimal>,
-  "units": <1-${settings.max_units_per_bet} if betting, 0 if skipping>,
+  "units": <1-${settings.max_units_per_bet} if action is "bet", 0.5-1 if action is "lean", 0 if skipping>,
   "confidence": <0-100>,
-  "reasoning": "<your full analysis: signals observed, what the numbers say, lean direction, and WHY you are or are not betting — always include even on skips>"
+  "reasoning": "<full analysis: signals observed, cipher hits, what the numbers say, directional read, and WHY this is a bet vs lean vs skip>"
 }
-IMPORTANT: Even when action is "skip", always include your LEAN (which team you favor and why) and full signal reasoning in the reasoning field. Never leave reasoning empty. A skip is not a pass on analysis — it means the signal is not strong enough to bet, but you still have a read. Mark the pick field with your lean team even on skips.`;
+IMPORTANT: Never leave reasoning empty. Never use "lean" as a hedge when you genuinely have no read — that is what "skip" is for. Lean means real signal at lower intensity.`;
 
   const parts = [settings.system_prompt, settings.bet_rules, jsonInstructions];
   return parts.filter(Boolean).join("\n\n");

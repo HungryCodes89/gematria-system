@@ -264,6 +264,45 @@ export async function POST() {
       }
     }
 
+    // ── Settle lean_tracked rows (result only, no P&L or bankroll impact) ───
+    const { data: leanTrades } = await sb
+      .from('paper_trades')
+      .select('*, game:games(*)')
+      .eq('bet_type', 'lean_tracked')
+      .is('result', null)
+
+    if (leanTrades && leanTrades.length > 0) {
+      // Ensure scoreMap has dates for any lean trades not covered by pendingTrades
+      const leanDates = new Set(leanTrades.map(t => (t.game as any)?.game_date).filter(Boolean))
+      for (const d of leanDates) {
+        if (gameDates.has(d)) continue
+        const [nba, nhl, mlb] = await Promise.all([
+          fetchNBAGames(d).catch(() => [] as ESPNGame[]),
+          fetchNHLGames(d).catch(() => [] as NHLGame[]),
+          fetchMLBGames(d).catch(() => [] as ESPNGame[]),
+        ])
+        for (const [id, s] of extractScoresFromEspn(nba)) scoreMap.set(id, s)
+        for (const [id, s] of extractScoresFromNhl(nhl)) scoreMap.set(id, s)
+        for (const [id, s] of extractScoresFromEspn(mlb)) scoreMap.set(id, s)
+      }
+
+      for (const trade of leanTrades) {
+        const liveScores = scoreMap.get(trade.game_id)
+        if (!liveScores || liveScores.status !== 'post') continue
+
+        // Coerce bet_type for determination: detect O/U leans from pick string
+        const { parseOverUnderLine } = await import('@/lib/settlement')
+        const effectiveBetType = parseOverUnderLine(trade.pick ?? '') ? 'over_under' : 'moneyline'
+        const tradeForSettle: PaperTrade = { ...trade, bet_type: effectiveBetType as any, game: undefined }
+        const result = determineTradeResult(tradeForSettle, liveScores.homeScore, liveScores.awayScore)
+
+        await sb.from('paper_trades')
+          .update({ result, profit_loss: 0, settled_at: new Date().toISOString() })
+          .eq('id', trade.id)
+          .is('result', null)
+      }
+    }
+
     // ── Update bankroll ledger ───────────────────────────────────────────────
     const today = getTodayET()
     let newBalance: number | null = null
