@@ -48,6 +48,10 @@ function espnGameToRow(g: ESPNGame, league: 'NBA' | 'MLB', today: string, fullMo
     away_losses: g.awayTeam.losses || 0,
     is_full_moon: fullMoon,
     is_primetime: isPrimetimeET(g.startTime),
+    is_playoff: g.isPlayoff ?? false,
+    playoff_round: g.playoffRound ?? null,
+    series_game_number: g.seriesGameNumber ?? null,
+    series_record: g.seriesRecord ?? null,
   }
 }
 
@@ -76,6 +80,10 @@ function nhlGameToRow(g: NHLGame, today: string, fullMoon: boolean) {
     away_losses: g.awayTeam.losses || 0,
     is_full_moon: fullMoon,
     is_primetime: isPrimetimeET(g.startTime),
+    is_playoff: g.isPlayoff ?? false,
+    playoff_round: g.playoffRound ?? null,
+    series_game_number: g.seriesGameNumber ?? null,
+    series_record: g.seriesRecord ?? null,
   }
 }
 

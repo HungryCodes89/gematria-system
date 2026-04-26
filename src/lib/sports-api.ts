@@ -46,6 +46,31 @@ export function parseEspnCompetitorScore(raw: unknown): number {
   return 0
 }
 
+// ── Playoff context extraction ──
+
+function extractEspnPlayoffContext(ev: any, comp: any): {
+  isPlayoff: boolean
+  playoffRound: string | null
+  seriesGameNumber: number | null
+  seriesRecord: string | null
+} {
+  const headline: string = comp?.notes?.[0]?.headline ?? ''
+  const seriesSummary: string = comp?.series?.summary ?? ''
+  // is_playoff: ESPN marks postseason with season.type = 3 on the response-level
+  // object, but per-event we detect via a series object or playoff-keyword headline
+  const isPlayoff = !!(comp?.series) || /playoff|first round|second round|conference/i.test(headline)
+
+  const gameMatch = headline.match(/game\s+(\d+)/i)
+  const seriesGameNumber = gameMatch ? parseInt(gameMatch[1]!, 10) : null
+
+  // Strip "- Game N" suffix to get clean round name
+  const playoffRound = headline
+    ? headline.replace(/\s*[-–]\s*game\s+\d+[\s\S]*$/i, '').trim() || null
+    : null
+
+  return { isPlayoff, playoffRound, seriesGameNumber, seriesRecord: seriesSummary || null }
+}
+
 // ── ESPN NBA ──
 
 export interface ESPNGame {
@@ -60,6 +85,10 @@ export interface ESPNGame {
   venue: { name: string; city: string; state: string }
   periodScores?: [number, number][]
   isOvertime?: boolean
+  isPlayoff?: boolean
+  playoffRound?: string | null
+  seriesGameNumber?: number | null
+  seriesRecord?: string | null
 }
 
 export async function fetchNBAGames(dateStr: string): Promise<ESPNGame[]> {
@@ -82,6 +111,7 @@ export async function fetchNBAGames(dateStr: string): Promise<ESPNGame[]> {
 
     const homeRec = parseRecord(home)
     const awayRec = parseRecord(away)
+    const playoff = extractEspnPlayoffContext(ev, comp)
 
     return {
       id: ev.id,
@@ -109,6 +139,10 @@ export async function fetchNBAGames(dateStr: string): Promise<ESPNGame[]> {
         city: venue?.address?.city || '',
         state: venue?.address?.state || '',
       },
+      isPlayoff: playoff.isPlayoff,
+      playoffRound: playoff.playoffRound,
+      seriesGameNumber: playoff.seriesGameNumber,
+      seriesRecord: playoff.seriesRecord,
       ...(() => {
         const homeLS = home?.linescores as Array<{ value?: number }> | undefined
         const awayLS = away?.linescores as Array<{ value?: number }> | undefined
@@ -152,6 +186,7 @@ export async function fetchMLBGames(dateStr: string): Promise<ESPNGame[]> {
     const homeRec = parseRecord(home)
     const awayRec = parseRecord(away)
     const inning = status?.period || 0
+    const playoff = extractEspnPlayoffContext(ev, comp)
 
     return {
       id: ev.id,
@@ -181,6 +216,10 @@ export async function fetchMLBGames(dateStr: string): Promise<ESPNGame[]> {
         city: venue?.address?.city || '',
         state: venue?.address?.state || '',
       },
+      isPlayoff: playoff.isPlayoff,
+      playoffRound: playoff.playoffRound,
+      seriesGameNumber: playoff.seriesGameNumber,
+      seriesRecord: playoff.seriesRecord,
       ...(() => {
         const homeLS = home?.linescores as Array<{ value?: number }> | undefined
         const awayLS = away?.linescores as Array<{ value?: number }> | undefined
@@ -210,6 +249,10 @@ export interface NHLGame {
   venue: { name: string; city: string }
   periodScores?: [number, number][]
   isOvertime?: boolean
+  isPlayoff?: boolean
+  playoffRound?: string | null
+  seriesGameNumber?: number | null
+  seriesRecord?: string | null
 }
 
 /** W-L-OTL row from NHL /standings/now, keyed by uppercase team abbrev */
@@ -272,6 +315,9 @@ export async function fetchNHLGames(dateStr: string, standingsMap?: NhlStandings
   for (const week of data.gameWeek || []) {
     if (week.date !== dateStr) continue
     for (const g of week.games || []) {
+      const ss = g.seriesSummary as { seriesTitle?: string; gameLabel?: string; seriesStatus?: string } | undefined
+      const isPlayoff = g.gameType === 3 || !!ss
+      const nhlGameMatch = ss?.gameLabel?.match(/(\d+)/)
       games.push({
         id: String(g.id),
         date: dateStr,
@@ -286,6 +332,10 @@ export async function fetchNHLGames(dateStr: string, standingsMap?: NhlStandings
           name: g.venue?.default || '',
           city: g.homeTeam?.placeName?.default || '',
         },
+        isPlayoff,
+        playoffRound: ss?.seriesTitle ?? null,
+        seriesGameNumber: nhlGameMatch ? parseInt(nhlGameMatch[1]!, 10) : null,
+        seriesRecord: ss?.seriesStatus ?? null,
       })
     }
   }

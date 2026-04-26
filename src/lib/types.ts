@@ -23,6 +23,11 @@ export interface Game {
   analyzed: boolean;
   lock_type: string | null;
   gematria_confidence: number | null;
+  // Playoff context (migration 012)
+  is_playoff: boolean | null;
+  playoff_round: string | null;
+  series_game_number: number | null;
+  series_record: string | null;
   created_at?: string;
   updated_at?: string;
 }

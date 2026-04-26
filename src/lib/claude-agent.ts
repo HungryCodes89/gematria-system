@@ -311,6 +311,12 @@ Venue: ${analysis.venue}
 Records: Home ${game.home_record ?? "N/A"} | Away ${game.away_record ?? "N/A"}
 Moon: ${(moonIll * 100).toFixed(0)}% illumination${fullMoon ? " (FULL MOON)" : ""}`
     );
+    if (game.is_playoff) {
+      const gameSuffix = game.series_game_number ? `, Game ${game.series_game_number} of 7` : "";
+      const roundLabel = game.playoff_round ? `${game.playoff_round}${gameSuffix}` : `Playoffs${gameSuffix}`;
+      const seriesLine = game.series_record ? ` | Series: ${game.series_record}` : "";
+      sections.push(`=== PLAYOFF CONTEXT ===\n${game.league} Playoffs — ${roundLabel}${seriesLine}`);
+    }
     if (h2hContext) sections.push(h2hContext);
     sections.push(`=== ODDS ===\n${formatOdds(game.polymarket_odds)}`);
     const sharpSection = formatSharpMoneySection(game.polymarket_odds, game.home_team, game.away_team);
@@ -342,6 +348,13 @@ Venue: ${analysis.venue}
 Records: Home ${game.home_record ?? "N/A"} | Away ${game.away_record ?? "N/A"}
 Moon: ${(moonIll * 100).toFixed(0)}% illumination${fullMoon ? " (FULL MOON)" : ""}`
   );
+
+  if (game.is_playoff) {
+    const gameSuffix = game.series_game_number ? `, Game ${game.series_game_number} of 7` : "";
+    const roundLabel = game.playoff_round ? `${game.playoff_round}${gameSuffix}` : `Playoffs${gameSuffix}`;
+    const seriesLine = game.series_record ? ` | Series: ${game.series_record}` : "";
+    sections.push(`=== PLAYOFF CONTEXT ===\n${game.league} Playoffs — ${roundLabel}${seriesLine}`);
+  }
 
   if (h2hContext) sections.push(h2hContext);
 
