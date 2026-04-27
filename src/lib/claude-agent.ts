@@ -445,15 +445,15 @@ Confidence: ${analysis.gematriaConfidence}%${bot === "A" ? `\nFavored Side: ${an
 
 function buildSystemMessage(settings: GematriaSettings): string {
   const jsonInstructions = `
-LOCK TIER TAXONOMY — Four conviction levels that determine system behavior:
+LOCK TIER TAXONOMY — Lean is the DEFAULT for any game with signal. Skip requires total absence of signal.
 
-  "bet" + lock_type "triple_lock": 3+ cipher patterns align AND at least one confirming layer (date lock, record lock, planetary ruler, or venue cipher). Highest conviction. Will be placed at full position.
-  "bet" + lock_type "double_lock": 2 cipher patterns align with at least one confirming layer. Solid conviction. Will be placed at reduced position.
-  "lean": 1 clear cipher pattern hit, OR 2 patterns without confirming layer, OR strong directional narrative with partial cipher alignment. Real signal, not enough to risk capital. Tracked but not bet. When in doubt between skip and a lock, return lean.
-  "skip": No coherent signal, conflicting indicators, or read below lean threshold.
+  "bet" + lock_type "triple_lock": 3+ cipher patterns align AND at least one confirming layer (date lock, record lock, planetary ruler, or venue cipher). Highest conviction. Full position.
+  "bet" + lock_type "double_lock": 2 cipher patterns align with at least one confirming layer. Solid conviction. Reduced position.
+  "lean": ANY directional read — one cipher match, a market signal, a narrative lean, a vague directional pull, anything above total noise. No bet placed, but your read is logged and tracked for accuracy. This is the correct output for most games. Do not talk yourself out of a lean.
+  "skip": Absolute zero signal. You have looked and found nothing — no cipher match, no narrative, no market tell, no directional read of any kind. Use only when you genuinely cannot point a direction.
 
-Expected distribution: 60-70% skip, 20-30% lean, 5-10% double_lock, 1-3% triple_lock.
-If your combined lock rate exceeds 15%, your threshold is too loose — move borderline picks to lean.
+Expected distribution: 20-30% skip, 50-60% lean, 5-15% double_lock, 1-5% triple_lock.
+If you are skipping more than 40% of games in a session, you are being too conservative — go back and convert borderline skips to leans.
 
 RULES:
   "bet" action REQUIRES lock_type to be "triple_lock" or "double_lock"
@@ -476,7 +476,7 @@ Return an array of trade decision objects. Each object must have:
   "confidence": <0-100>,
   "reasoning": "<full analysis: signals observed, cipher hits, what the numbers say, directional read, and WHY this is a bet vs lean vs skip>"
 }
-IMPORTANT: Never leave reasoning empty. Never use "lean" as a hedge when you genuinely have no read — that is what "skip" is for. Lean means real signal at lower intensity.`;
+IMPORTANT: Never leave reasoning empty. A lean is a real read — log it. Skip only when you have nothing at all.`;
 
   const parts = [settings.system_prompt, settings.bet_rules, jsonInstructions];
   return parts.filter(Boolean).join("\n\n");
