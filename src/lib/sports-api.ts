@@ -15,7 +15,7 @@ export async function fetchWithRetry(url: string, retries = 3, delayMs = 1000): 
     try {
       const res = await fetch(url, {
         headers: { 'User-Agent': FETCH_UA },
-        next: { revalidate: 300 },
+        cache: 'no-store',
       })
       if (res.ok) return res
       if (res.status === 429 || res.status >= 500) {

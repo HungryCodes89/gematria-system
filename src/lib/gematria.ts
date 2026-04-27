@@ -73,8 +73,10 @@ function isLeapYear(year: number): boolean {
 }
 
 function getDayOfYear(date: Date): number {
-  const start = new Date(date.getFullYear(), 0, 1)
-  return Math.floor((date.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1
+  const y = date.getFullYear()
+  const start = Date.UTC(y, 0, 1)
+  const target = Date.UTC(y, date.getMonth(), date.getDate())
+  return Math.floor((target - start) / (1000 * 60 * 60 * 24)) + 1
 }
 
 export function calculateDateNumerology(date: Date): DateNumerology {
