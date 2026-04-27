@@ -445,17 +445,26 @@ Confidence: ${analysis.gematriaConfidence}%${bot === "A" ? `\nFavored Side: ${an
 
 function buildSystemMessage(settings: GematriaSettings): string {
   const jsonInstructions = `
-LOCK TIER TAXONOMY — Three conviction levels, each triggers different system behavior:
+LOCK TIER TAXONOMY — Four conviction levels that determine system behavior:
 
-  "bet" + lock_type "triple_lock" — Highest conviction. 3+ cipher/pattern alignments converging. Your strongest call. Full position.
-  "bet" + lock_type "double_lock" — Solid conviction. Clear cipher logic, 2+ alignments. Confident pick. Normal position.
-  "lean" — Moderate signal. You see a directional edge but alignment is weaker, fewer pattern hits, or conviction doesn't justify a full position. Return action "lean" — the system will track this pick and measure your hit rate, but will NOT place a bet. Only use lean when you would genuinely take the bet at a smaller size if forced — not as a fallback when you're unsure. A lean is a real read, just less of it.
-  "skip" — Signal below lean threshold. You have no meaningful directional read. Still include full reasoning explaining what you saw and why it didn't reach lean threshold.
+  "bet" + lock_type "triple_lock": 3+ cipher patterns align AND at least one confirming layer (date lock, record lock, planetary ruler, or venue cipher). Highest conviction. Will be placed at full position.
+  "bet" + lock_type "double_lock": 2 cipher patterns align with at least one confirming layer. Solid conviction. Will be placed at reduced position.
+  "lean": 1 clear cipher pattern hit, OR 2 patterns without confirming layer, OR strong directional narrative with partial cipher alignment. Real signal, not enough to risk capital. Tracked but not bet. When in doubt between skip and a lock, return lean.
+  "skip": No coherent signal, conflicting indicators, or read below lean threshold.
+
+Expected distribution: 60-70% skip, 20-30% lean, 5-10% double_lock, 1-3% triple_lock.
+If your combined lock rate exceeds 15%, your threshold is too loose — move borderline picks to lean.
+
+RULES:
+  "bet" action REQUIRES lock_type to be "triple_lock" or "double_lock"
+  "lean" action REQUIRES lock_type to be null
+  "skip" action REQUIRES lock_type to be null AND picked_side to be null
 
 RESPONSE FORMAT — You must respond with valid JSON only. No markdown, no explanation outside the JSON.
 Return an array of trade decision objects. Each object must have:
 {
   "action": "bet" | "lean" | "skip",
+  "lock_type": "triple_lock" | "double_lock" | null,
   "betType": "moneyline" | "over_under",
   "pick": "<team name or Over/Under X.X — required even on lean/skip, use your directional read>",
   "pickedSide": "home" | "away" | null,

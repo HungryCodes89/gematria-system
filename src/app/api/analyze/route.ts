@@ -29,13 +29,6 @@ const AUTO_BET_MAP: Record<LockType, keyof GematriaSettings | null> = {
   no_lock:        null,
 };
 
-function confidenceToLockType(confidence: number): LockType {
-  if (confidence >= 75) return "triple_lock";
-  if (confidence >= 60) return "double_lock";
-  if (confidence >= 55) return "single_lock";
-  return "no_lock";
-}
-
 function sse(data: unknown): string {
   return `data: ${JSON.stringify(data)}\n\n`;
 }
@@ -229,9 +222,7 @@ async function gatherEligibleBets(
     const effectiveLockType: LockType =
       analysis.lockType === "sacrifice_lock"
         ? "sacrifice_lock"
-        : bot === "A"
-          ? analysis.lockType as LockType
-          : confidenceToLockType(decision.confidence);
+        : (decision.lock_type ?? "no_lock");
 
     console.log(`[gather] Bot ${bot} [${idx}] action=bet pick="${decision.pick}" conf=${decision.confidence}% effectiveLock=${effectiveLockType}`);
 
@@ -708,7 +699,7 @@ export async function POST(req: NextRequest) {
             const { analysis, decisions } = await analyzeGameWithClaude(game, botDSettings, "D", todayNotes, matchedPatterns, provenPatternsD.length > 0 ? provenPatternsD : undefined, sacrificePatternsD.length > 0 ? sacrificePatternsD : undefined, h2hCtx);
             console.log(`[bot-D] lockType=${analysis.lockType} engineConf=${analysis.confidence}% decisions=${decisions.length}`);
             decisions.forEach((dv, ii) => {
-              console.log(`[bot-D] decision[${ii}] action=${dv.action} pick="${dv.pick}" conf=${dv.confidence}% odds=${dv.odds} units=${dv.units} effectiveLock=${confidenceToLockType(dv.confidence)}`);
+              console.log(`[bot-D] decision[${ii}] action=${dv.action} lock_type=${dv.lock_type ?? "null"} pick="${dv.pick}" conf=${dv.confidence}% odds=${dv.odds} units=${dv.units}`);
             });
             analysisD = analysis;
             const g = await gatherEligibleBets(supabase, game, decisions, analysis, "D", settings, botDState);

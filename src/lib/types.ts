@@ -85,6 +85,7 @@ export interface ConsolidatedOdds {
 
 export interface TradeDecision {
   action: "bet" | "lean" | "skip";
+  lock_type: "triple_lock" | "double_lock" | null;
   betType: "moneyline" | "over_under";
   pick: string;
   pickedSide: "home" | "away" | null;
