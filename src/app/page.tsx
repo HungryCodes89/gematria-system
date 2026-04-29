@@ -203,7 +203,7 @@ export default function Dashboard() {
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bot: selectedBot, gameId }),
+        body: JSON.stringify({ bot: selectedBot, gameId, force: true }),
       });
       if (res.body) {
         const reader  = res.body.getReader();
@@ -267,67 +267,74 @@ export default function Dashboard() {
     setLoading("analyze");
     setStatusMsg("");
     setAnalyzeProgress(null);
+
+    const toAnalyze = games.filter(g => !g.analyzed);
+    if (toAnalyze.length === 0) {
+      setStatusMsg("All games already analyzed");
+      setLoading(null);
+      return;
+    }
+
+    let totalBets     = 0;
+    let totalAnalyzed = 0;
+    const allErrors: string[] = [];
+
     try {
-      const res = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bot: selectedBot }),
-      });
-      if (!res.body) {
-        const data = await res.json();
-        setStatusMsg(`Analyzed ${data.analyzed} games, placed ${data.betsPlaced} bets`);
-        toast.success(`Placed ${data.betsPlaced} bets`);
-        loadGames();
-        return;
-      }
-      const reader  = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-      let lastResult: {
-        analyzed: number; betsPlaced: number; errors?: string[];
-        settingsSnapshot?: Record<string, unknown>;
-      } = { analyzed: 0, betsPlaced: 0 };
-      const gameErrors: string[] = [];
+      for (let i = 0; i < toAnalyze.length; i++) {
+        const game = toAnalyze[i]!;
+        setAnalyzeProgress({ current: i + 1, total: toAnalyze.length, label: `${game.away_team} at ${game.home_team}` });
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const lines = buf.split("\n");
-        buf = lines.pop() || "";
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          try {
-            const ev = JSON.parse(line.slice(6));
-            if (ev.done) {
-              lastResult = ev;
-            } else if (ev.total) {
-              setAnalyzeProgress({ current: ev.game, total: ev.total, label: ev.teams || "" });
-            } else if (ev.status === "error") {
-              gameErrors.push(`${ev.teams}: ${ev.error}`);
+        try {
+          const res = await fetch("/api/analyze", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ bot: selectedBot, gameId: game.id }),
+          });
+
+          if (res.body) {
+            const reader  = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buf = "";
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buf += decoder.decode(value, { stream: true });
+              const lines = buf.split("\n");
+              buf = lines.pop() || "";
+              for (const line of lines) {
+                if (!line.startsWith("data: ")) continue;
+                try {
+                  const ev = JSON.parse(line.slice(6));
+                  if (ev.done) {
+                    totalBets     += ev.betsPlaced ?? 0;
+                    totalAnalyzed += ev.analyzed   ?? 0;
+                  } else if (ev.status === "error") {
+                    allErrors.push(`${ev.teams}: ${ev.error}`);
+                  }
+                } catch { /* skip bad json */ }
+              }
             }
-          } catch { /* skip bad json */ }
+          } else {
+            const data = await res.json().catch(() => ({})) as { error?: string };
+            if (!res.ok) allErrors.push(`${game.away_team} @ ${game.home_team}: ${data.error ?? res.statusText}`);
+          }
+        } catch (e) {
+          allErrors.push(`${game.away_team} @ ${game.home_team}: ${String(e)}`);
         }
       }
 
-      const allErrors = [...gameErrors, ...(lastResult.errors ?? [])];
-      if (lastResult.betsPlaced === 0 && lastResult.analyzed > 0) {
-        const snap  = lastResult.settingsSnapshot as Record<string, unknown> | undefined;
-        const hints: string[] = [];
-        if (allErrors.length > 0) hints.push(`${allErrors.length} Claude error(s)`);
-        if (snap) {
-          if (!snap.auto_bet_triple_locks && !snap.auto_bet_double_locks && !snap.auto_bet_single_locks)
-            hints.push("All auto-bet toggles OFF");
-          hints.push(`Model: ${snap.model}`);
-        }
-        setStatusMsg(`Analyzed ${lastResult.analyzed} games — 0 bets. ${hints.join(" · ")}`);
-        toast.error(`0 bets placed — ${hints[0] ?? "check settings"}`);
+      loadGames();
+
+      if (totalBets === 0 && totalAnalyzed > 0) {
+        setStatusMsg(`Analyzed ${totalAnalyzed} games — 0 bets`);
+        toast.error("0 bets placed — check settings");
+      } else if (totalAnalyzed > 0) {
+        setStatusMsg(`Analyzed ${totalAnalyzed} games · ${totalBets} bets placed`);
+        if (totalBets > 0) toast.success(`Placed ${totalBets} bets`);
       } else {
-        setStatusMsg(`Analyzed ${lastResult.analyzed} games · ${lastResult.betsPlaced} bets placed`);
-        if (lastResult.betsPlaced > 0) toast.success(`Placed ${lastResult.betsPlaced} bets`);
+        setStatusMsg("No games analyzed");
       }
       if (allErrors.length > 0) allErrors.forEach((e) => toast.error(e, { duration: 6000 }));
-      loadGames();
     } catch (e) {
       toast.error("Analysis failed: " + String(e));
     } finally {
