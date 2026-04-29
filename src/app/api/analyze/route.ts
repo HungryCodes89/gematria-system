@@ -414,6 +414,7 @@ async function writeLeanTracked(
 }
 
 export async function POST(req: NextRequest) {
+  console.log('[analyze] START — fetching games');
   const supabase = getSupabaseAdmin();
   const today = getTodayET();
 
@@ -476,6 +477,7 @@ export async function POST(req: NextRequest) {
 
   const { data: games } = await gamesQuery;
   const unanalyzed: Game[] = (games ?? []) as Game[];
+  console.log('[analyze] Got', unanalyzed.length, 'games:', unanalyzed.map(g => g.id));
   console.log(`[analyze] runA=${runA} runB=${runB} runC=${runC} runD=${runD} games=${unanalyzed.length} bot=${botParam}`);
   console.log(`[analyze] runD gate: botParam=${botParam} bot_d_prompt_set=${Boolean(settings.bot_d_system_prompt)} (${(settings.bot_d_system_prompt ?? "").length} chars)`);
   console.log(`[analyze] settings: min_confidence=${settings.min_confidence} triple=${settings.auto_bet_triple_locks} double=${settings.auto_bet_double_locks} single=${settings.auto_bet_single_locks}`);
@@ -632,8 +634,10 @@ export async function POST(req: NextRequest) {
 
   const stream = new ReadableStream({
     async start(controller) {
+      console.log('[analyze] Processing', unanalyzed.length, 'games:', unanalyzed.map(g => g.id));
       for (let i = 0; i < unanalyzed.length; i++) {
         const game = unanalyzed[i]!;
+        console.log(`[analyze] === GAME ${game.id} ${game.away_team} @ ${game.home_team} ===`);
 
         try {
           controller.enqueue(sse({ game: i + 1, total, status: "analyzing", teams: `${game.away_team} at ${game.home_team}` }));
@@ -647,11 +651,17 @@ export async function POST(req: NextRequest) {
           let leanDecisionsA: BotDecision[] = [];
           const skipA = runA && !forceReanalyze && alreadyProcessed(game.id, botAState.gameIds);
           if (runA && !skipA) {
-            console.log(`[analyze] Bot A analyzing ${game.away_team} @ ${game.home_team}`);
-            const { analysis, decisions } = await analyzeGameWithClaude(game, settings, "A", todayNotes, matchedPatterns, provenPatternsA.length > 0 ? provenPatternsA : undefined, sacrificePatternsA.length > 0 ? sacrificePatternsA : undefined, h2hCtx);
-            analysisA = analysis;
-            const g = await gatherEligibleBets(supabase, game, decisions, analysis, "A", settings, botAState);
-            logsA = g.logs; betDecisionsA = g.betDecisions; leanDecisionsA = g.leanDecisions;
+            console.log(`[analyze] [${game.id}] Calling Bot A, prompt length:`, settings.system_prompt.length, `gates: runA=${runA} runB=${runB} runC=${runC} runD=${runD}`);
+            try {
+              const { analysis, decisions } = await analyzeGameWithClaude(game, settings, "A", todayNotes, matchedPatterns, provenPatternsA.length > 0 ? provenPatternsA : undefined, sacrificePatternsA.length > 0 ? sacrificePatternsA : undefined, h2hCtx);
+              decisions.forEach(dv => console.log(`[analyze] [${game.id}] Bot A returned action=${dv.action} confidence=${dv.confidence} picked_side=${dv.pickedSide ?? null}`));
+              analysisA = analysis;
+              const g = await gatherEligibleBets(supabase, game, decisions, analysis, "A", settings, botAState);
+              logsA = g.logs; betDecisionsA = g.betDecisions; leanDecisionsA = g.leanDecisions;
+            } catch (err: unknown) {
+              const e = err instanceof Error ? err : new Error(String(err));
+              console.error(`[analyze] [${game.id}] Bot A ERROR:`, e.message, e.stack);
+            }
           } else if (skipA) {
             console.log(`[analyze] Bot A skip — already processed game ${game.id}`);
           }
@@ -663,11 +673,17 @@ export async function POST(req: NextRequest) {
           let leanDecisionsB: BotDecision[] = [];
           const skipB = runB && !forceReanalyze && alreadyProcessed(game.id, botBState.gameIds);
           if (runB && !skipB) {
-            console.log(`[analyze] Bot B analyzing ${game.away_team} @ ${game.home_team}`);
-            const { analysis, decisions } = await analyzeGameWithClaude(game, botBSettings, "B", todayNotes, matchedPatterns, provenPatternsB.length > 0 ? provenPatternsB : undefined, sacrificePatternsB.length > 0 ? sacrificePatternsB : undefined, h2hCtx);
-            analysisB = analysis;
-            const g = await gatherEligibleBets(supabase, game, decisions, analysis, "B", settings, botBState);
-            logsB = g.logs; betDecisionsB = g.betDecisions; leanDecisionsB = g.leanDecisions;
+            console.log(`[analyze] [${game.id}] Calling Bot B, prompt length:`, botBSettings.system_prompt.length, `gates: runA=${runA} runB=${runB} runC=${runC} runD=${runD}`);
+            try {
+              const { analysis, decisions } = await analyzeGameWithClaude(game, botBSettings, "B", todayNotes, matchedPatterns, provenPatternsB.length > 0 ? provenPatternsB : undefined, sacrificePatternsB.length > 0 ? sacrificePatternsB : undefined, h2hCtx);
+              decisions.forEach(dv => console.log(`[analyze] [${game.id}] Bot B returned action=${dv.action} confidence=${dv.confidence} picked_side=${dv.pickedSide ?? null}`));
+              analysisB = analysis;
+              const g = await gatherEligibleBets(supabase, game, decisions, analysis, "B", settings, botBState);
+              logsB = g.logs; betDecisionsB = g.betDecisions; leanDecisionsB = g.leanDecisions;
+            } catch (err: unknown) {
+              const e = err instanceof Error ? err : new Error(String(err));
+              console.error(`[analyze] [${game.id}] Bot B ERROR:`, e.message, e.stack);
+            }
           } else if (skipB) {
             console.log(`[analyze] Bot B skip — already processed game ${game.id}`);
           }
@@ -679,11 +695,17 @@ export async function POST(req: NextRequest) {
           let leanDecisionsC: BotDecision[] = [];
           const skipC = runC && !forceReanalyze && alreadyProcessed(game.id, botCState.gameIds);
           if (runC && !skipC) {
-            console.log(`[analyze] Bot C analyzing ${game.away_team} @ ${game.home_team}`);
-            const { analysis, decisions } = await analyzeGameWithClaude(game, botCSettings, "C", todayNotes, matchedPatterns, provenPatternsC.length > 0 ? provenPatternsC : undefined, sacrificePatternsC.length > 0 ? sacrificePatternsC : undefined, h2hCtx);
-            analysisC = analysis;
-            const g = await gatherEligibleBets(supabase, game, decisions, analysis, "C", settings, botCState);
-            logsC = g.logs; betDecisionsC = g.betDecisions; leanDecisionsC = g.leanDecisions;
+            console.log(`[analyze] [${game.id}] Calling Bot C, prompt length:`, botCSettings.system_prompt.length, `gates: runA=${runA} runB=${runB} runC=${runC} runD=${runD}`);
+            try {
+              const { analysis, decisions } = await analyzeGameWithClaude(game, botCSettings, "C", todayNotes, matchedPatterns, provenPatternsC.length > 0 ? provenPatternsC : undefined, sacrificePatternsC.length > 0 ? sacrificePatternsC : undefined, h2hCtx);
+              decisions.forEach(dv => console.log(`[analyze] [${game.id}] Bot C returned action=${dv.action} confidence=${dv.confidence} picked_side=${dv.pickedSide ?? null}`));
+              analysisC = analysis;
+              const g = await gatherEligibleBets(supabase, game, decisions, analysis, "C", settings, botCState);
+              logsC = g.logs; betDecisionsC = g.betDecisions; leanDecisionsC = g.leanDecisions;
+            } catch (err: unknown) {
+              const e = err instanceof Error ? err : new Error(String(err));
+              console.error(`[analyze] [${game.id}] Bot C ERROR:`, e.message, e.stack);
+            }
           } else if (skipC) {
             console.log(`[analyze] Bot C skip — already processed game ${game.id}`);
           }
@@ -695,15 +717,21 @@ export async function POST(req: NextRequest) {
           let leanDecisionsD: BotDecision[] = [];
           const skipD = runD && !forceReanalyze && alreadyProcessed(game.id, botDState.gameIds);
           if (runD && !skipD) {
-            console.log(`[analyze] Bot D analyzing ${game.away_team} @ ${game.home_team}`);
-            const { analysis, decisions } = await analyzeGameWithClaude(game, botDSettings, "D", todayNotes, matchedPatterns, provenPatternsD.length > 0 ? provenPatternsD : undefined, sacrificePatternsD.length > 0 ? sacrificePatternsD : undefined, h2hCtx);
-            console.log(`[bot-D] lockType=${analysis.lockType} engineConf=${analysis.confidence}% decisions=${decisions.length}`);
-            decisions.forEach((dv, ii) => {
-              console.log(`[bot-D] decision[${ii}] action=${dv.action} lock_type=${dv.lock_type ?? "null"} pick="${dv.pick}" conf=${dv.confidence}% odds=${dv.odds} units=${dv.units}`);
-            });
-            analysisD = analysis;
-            const g = await gatherEligibleBets(supabase, game, decisions, analysis, "D", settings, botDState);
-            logsD = g.logs; betDecisionsD = g.betDecisions; leanDecisionsD = g.leanDecisions;
+            console.log(`[analyze] [${game.id}] Calling Bot D, prompt length:`, botDSettings.system_prompt.length, `gates: runA=${runA} runB=${runB} runC=${runC} runD=${runD}`);
+            try {
+              const { analysis, decisions } = await analyzeGameWithClaude(game, botDSettings, "D", todayNotes, matchedPatterns, provenPatternsD.length > 0 ? provenPatternsD : undefined, sacrificePatternsD.length > 0 ? sacrificePatternsD : undefined, h2hCtx);
+              console.log(`[bot-D] lockType=${analysis.lockType} engineConf=${analysis.confidence}% decisions=${decisions.length}`);
+              decisions.forEach((dv, ii) => {
+                console.log(`[bot-D] decision[${ii}] action=${dv.action} lock_type=${dv.lock_type ?? "null"} pick="${dv.pick}" conf=${dv.confidence}% odds=${dv.odds} units=${dv.units}`);
+              });
+              decisions.forEach(dv => console.log(`[analyze] [${game.id}] Bot D returned action=${dv.action} confidence=${dv.confidence} picked_side=${dv.pickedSide ?? null}`));
+              analysisD = analysis;
+              const g = await gatherEligibleBets(supabase, game, decisions, analysis, "D", settings, botDState);
+              logsD = g.logs; betDecisionsD = g.betDecisions; leanDecisionsD = g.leanDecisions;
+            } catch (err: unknown) {
+              const e = err instanceof Error ? err : new Error(String(err));
+              console.error(`[analyze] [${game.id}] Bot D ERROR:`, e.message, e.stack);
+            }
           } else if (skipD) {
             console.log(`[analyze] Bot D skip — already processed game ${game.id}`);
           } else if (!runD) {
@@ -762,6 +790,7 @@ export async function POST(req: NextRequest) {
           }
 
           analyzed++;
+          console.log(`[analyze] [${game.id}] DONE — wrote ${(reconcileOutcome === "placed" || reconcileOutcome === "lean_tracked") ? 1 : 0} rows (reconcile=${reconcileOutcome})`);
           controller.enqueue(sse({
             game: i + 1,
             total,
@@ -819,6 +848,7 @@ export async function POST(req: NextRequest) {
           auto_bet_single_locks: settings.auto_bet_single_locks,
         },
       }));
+      console.log(`[analyze] PIPELINE COMPLETE — analyzed ${analyzed}/${unanalyzed.length} games`);
       controller.close();
     },
   });
