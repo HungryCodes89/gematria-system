@@ -106,22 +106,18 @@ const LINKS = [
   { href: "/settings",    label: "Settings",    Icon: SaturnIcon      },
 ];
 
-function useLiveClock() {
-  const [time, setTime] = useState(() =>
-    new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })
-  );
+function tick(): string {
+  return new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+}
+
+function useLiveClock(): string | null {
+  const [time, setTime] = useState<string | null>(null);
   useEffect(() => {
-    const id = setInterval(() => {
-      setTime(new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }));
-    }, 30_000);
+    setTime(tick());
+    const id = setInterval(() => setTime(tick()), 60_000);
     return () => clearInterval(id);
   }, []);
   return time;
-}
-
-function dayNum(): number {
-  const d = new Date();
-  return d.getDate() + d.getMonth() + 1 + d.getFullYear();
 }
 
 function reduce(n: number): number {
@@ -135,7 +131,12 @@ export default function Nav() {
   const pathname = usePathname();
   const [expanded, setExpanded] = useState(false);
   const clock = useLiveClock();
-  const dayReduced = reduce(dayNum());
+  const [dayReduced, setDayReduced] = useState<number | null>(null);
+
+  useEffect(() => {
+    const d = new Date();
+    setDayReduced(reduce(d.getDate() + d.getMonth() + 1 + d.getFullYear()));
+  }, []);
 
   return (
     <nav
@@ -239,7 +240,7 @@ export default function Nav() {
               letterSpacing: "0.06em",
             }}
           >
-            {clock}
+            {clock ?? "—"}
           </div>
           <div
             className="text-[10px] mt-0.5 whitespace-nowrap overflow-hidden transition-opacity duration-200"
@@ -248,7 +249,7 @@ export default function Nav() {
               opacity: expanded ? 1 : 0,
             }}
           >
-            DAY·{dayReduced}
+            DAY·{dayReduced ?? "—"}
           </div>
           {/* Collapsed: just a dot */}
           {!expanded && (
