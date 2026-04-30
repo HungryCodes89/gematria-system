@@ -450,7 +450,7 @@ LOCK TIER TAXONOMY — Lean is the DEFAULT for any game with signal. Skip requir
   "bet" + lock_type "triple_lock": 3+ cipher patterns align AND at least one confirming layer (date lock, record lock, planetary ruler, or venue cipher). Highest conviction. Full position.
   "bet" + lock_type "double_lock": 2 cipher patterns align with at least one confirming layer. Solid conviction. Reduced position.
   "lean": ANY directional read — one cipher match, a market signal, a narrative lean, a vague directional pull, anything above total noise. No bet placed, but your read is logged and tracked for accuracy. This is the correct output for most games. Do not talk yourself out of a lean.
-  "skip": Absolute zero signal. You have looked and found nothing — no cipher match, no narrative, no market tell, no directional read of any kind. Use only when you genuinely cannot point a direction.
+  "skip": Declining to take a position — insufficient edge, contradictory signals, poor historical CLV, or deliberate pass. Note: skip means no bet, not necessarily no direction. You may still have a cipher or narrative read on the favored side even when you are not betting. Capture that read in picked_side (see RULES below). Only use skip when the reason is "not enough edge to bet" — if you truly have zero directional signal, lean or skip are both acceptable, but lean is preferred.
 
 Expected distribution: 20-30% skip, 50-60% lean, 5-15% double_lock, 1-5% triple_lock.
 If you are skipping more than 40% of games in a session, you are being too conservative — go back and convert borderline skips to leans.
@@ -458,7 +458,7 @@ If you are skipping more than 40% of games in a session, you are being too conse
 RULES:
   "bet" action REQUIRES lock_type to be "triple_lock" or "double_lock"
   "lean" action REQUIRES lock_type to be null
-  "skip" action REQUIRES lock_type to be null AND picked_side to be null
+  "skip" action REQUIRES lock_type to be null. picked_side: return "home" | "away" if you have any directional read from ciphers, narrative, or market — even if you are not betting. Only return null if you genuinely cannot determine a direction (e.g. ciphers are perfectly contradictory or absent on both sides).
 
 RESPONSE FORMAT — You must respond with valid JSON only. No markdown, no explanation outside the JSON.
 Return an array of trade decision objects. Each object must have:
@@ -476,7 +476,7 @@ Return an array of trade decision objects. Each object must have:
   "confidence": <0-100>,
   "reasoning": "<full analysis: signals observed, cipher hits, what the numbers say, directional read, and WHY this is a bet vs lean vs skip>"
 }
-IMPORTANT: Never leave reasoning empty. A lean is a real read — log it. Skip only when you have nothing at all.`;
+IMPORTANT: Never leave reasoning empty. A lean is a real read — log it. On skip, still populate picked_side with your directional read if you have one — that data is tracked independently of whether a bet was placed.`;
 
   const parts = [settings.system_prompt, settings.bet_rules, jsonInstructions];
   return parts.filter(Boolean).join("\n\n");
