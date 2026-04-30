@@ -566,13 +566,13 @@ export async function POST(req: NextRequest) {
   // Fetch today's bot trades + today's skipped picks for cross-session dedup.
   // A game in skipped_picks was already reconciled (disagreement) — don't re-run it.
   const [botARes, botBRes, botCRes, botDRes, skippedRes] = await Promise.all([
-    supabase.from("paper_trades").select("units, game_id").eq("bot", "A")
+    supabase.from("paper_trades").select("units, game_id").eq("bot", "A").neq("bet_type", "analysis")
       .gte("placed_at", `${today}T00:00:00`).lt("placed_at", `${today}T23:59:59.999`),
-    supabase.from("paper_trades").select("units, game_id").eq("bot", "B")
+    supabase.from("paper_trades").select("units, game_id").eq("bot", "B").neq("bet_type", "analysis")
       .gte("placed_at", `${today}T00:00:00`).lt("placed_at", `${today}T23:59:59.999`),
-    supabase.from("paper_trades").select("units, game_id").eq("bot", "C")
+    supabase.from("paper_trades").select("units, game_id").eq("bot", "C").neq("bet_type", "analysis")
       .gte("placed_at", `${today}T00:00:00`).lt("placed_at", `${today}T23:59:59.999`),
-    supabase.from("paper_trades").select("units, game_id").eq("bot", "D")
+    supabase.from("paper_trades").select("units, game_id").eq("bot", "D").neq("bet_type", "analysis")
       .gte("placed_at", `${today}T00:00:00`).lt("placed_at", `${today}T23:59:59.999`),
     supabase.from("skipped_picks").select("game_id")
       .gte("created_at", `${today}T00:00:00`).lt("created_at", `${today}T23:59:59.999`),
