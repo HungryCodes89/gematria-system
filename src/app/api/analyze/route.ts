@@ -377,7 +377,7 @@ async function writeLeanTracked(
   game: Game,
   decision: ReconciledDecision,
 ): Promise<void> {
-  const { error } = await supabase.from("paper_trades").insert({
+  const { error } = await supabase.from("paper_trades").upsert({
     game_id: game.id,
     bot: decision.bot,
     bet_type: "lean_tracked",
@@ -402,7 +402,7 @@ async function writeLeanTracked(
     sizing_note: decision.sizing_note,
     was_reconciled: true,
     placed_at: new Date().toISOString(),
-  });
+  }, { onConflict: "game_id,bet_type,bot" });
   if (error) {
     console.error(`[lean] DB INSERT FAILED for game ${game.id}: ${error.message}`);
   } else {
@@ -470,7 +470,7 @@ export async function POST(req: NextRequest) {
   if (forceParam) {
     await Promise.all([
       supabase.from("games").update({ analyzed: false }).eq("id", gameIdParam),
-      supabase.from("paper_trades").delete().eq("game_id", gameIdParam).eq("bet_type", "analysis"),
+      supabase.from("paper_trades").delete().eq("game_id", gameIdParam).in("bet_type", ["analysis", "lean_tracked"]),
       supabase.from("skipped_picks").delete().eq("game_id", gameIdParam),
     ]);
   }
@@ -620,6 +620,7 @@ export async function POST(req: NextRequest) {
 
   const total = unanalyzed.length;
   let analyzed = 0;
+  let leansTracked = 0;
   const errors: string[] = [];
 
   const h2hMap = new Map<string, string>();
@@ -788,6 +789,7 @@ export async function POST(req: NextRequest) {
               const leanDecision: ReconciledDecision = { ...reconciledLean, units: 0 };
               await writeLeanTracked(supabase, game, leanDecision);
               reconcileOutcome = "lean_tracked";
+              leansTracked++;
             }
           }
           // ──────────────────────────────────────────────────────────────
@@ -852,6 +854,7 @@ export async function POST(req: NextRequest) {
         done: true,
         analyzed,
         betsPlaced: totalBets,
+        leansTracked,
         botA: { bets: botAState.betsPlaced, enabled: runA },
         botB: { bets: botBState.betsPlaced, enabled: runB },
         botC: { bets: botCState.betsPlaced, enabled: runC },

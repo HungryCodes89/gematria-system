@@ -276,6 +276,7 @@ export default function Dashboard() {
     }
 
     let totalBets     = 0;
+    let totalLeans    = 0;
     let totalAnalyzed = 0;
     const allErrors: string[] = [];
 
@@ -306,8 +307,9 @@ export default function Dashboard() {
                 try {
                   const ev = JSON.parse(line.slice(6));
                   if (ev.done) {
-                    totalBets     += ev.betsPlaced ?? 0;
-                    totalAnalyzed += ev.analyzed   ?? 0;
+                    totalBets     += ev.betsPlaced    ?? 0;
+                    totalLeans    += ev.leansTracked  ?? 0;
+                    totalAnalyzed += ev.analyzed      ?? 0;
                   } else if (ev.status === "error") {
                     allErrors.push(`${ev.teams}: ${ev.error}`);
                   }
@@ -325,12 +327,14 @@ export default function Dashboard() {
 
       loadGames();
 
-      if (totalBets === 0 && totalAnalyzed > 0) {
-        setStatusMsg(`Analyzed ${totalAnalyzed} games — 0 bets`);
-        toast.error("0 bets placed — check settings");
-      } else if (totalAnalyzed > 0) {
-        setStatusMsg(`Analyzed ${totalAnalyzed} games · ${totalBets} bets placed`);
-        if (totalBets > 0) toast.success(`Placed ${totalBets} bets`);
+      if (totalAnalyzed > 0) {
+        const parts = [];
+        if (totalBets > 0)   parts.push(`${totalBets} bet${totalBets > 1 ? "s" : ""}`);
+        if (totalLeans > 0)  parts.push(`${totalLeans} lean${totalLeans > 1 ? "s" : ""}`);
+        const summary = parts.length > 0 ? parts.join(" · ") : "0 bets";
+        setStatusMsg(`Analyzed ${totalAnalyzed} games — ${summary}`);
+        if (totalBets > 0)  toast.success(`Placed ${totalBets} bet${totalBets > 1 ? "s" : ""}`);
+        else if (totalLeans > 0) toast.success(`Tracked ${totalLeans} lean${totalLeans > 1 ? "s" : ""}`);
       } else {
         setStatusMsg("No games analyzed");
       }

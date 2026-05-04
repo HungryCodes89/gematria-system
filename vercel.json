@@ -8,9 +8,14 @@
     "src/app/api/reflection/route.ts": { "maxDuration": 300 },
     "src/app/api/cron/reflection/route.ts": { "maxDuration": 300 },
     "src/app/api/fetch-games/route.ts": { "maxDuration": 60 },
+    "src/app/api/cron/fetch-games/route.ts": { "maxDuration": 60 },
     "src/app/api/cron/debrief/route.ts": { "maxDuration": 120 }
   },
   "crons": [
+    {
+      "path": "/api/cron/fetch-games",
+      "schedule": "30 14 * * *"
+    },
     {
       "path": "/api/cron/snapshot-lines",
       "schedule": "30 22 * * *"
